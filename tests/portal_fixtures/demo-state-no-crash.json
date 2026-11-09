@@ -1,0 +1,105 @@
+{
+  "simulated": true,
+  "labels": {
+    "top_line": "Demo: Every lead is demo data. The demo CRM (customer records) and the demo mail are stand-ins. AI ratings are pre-written. Nothing here is sent to real customers or real systems.",
+    "short_line": "Every lead is demo data. Demo CRM, demo mail, pre-written AI ratings. Nothing reaches real customers.",
+    "tiles": {
+      "kpi-leads": "Leads",
+      "kpi-outbox": "Emails in demo mail",
+      "kpi-duplicates": "Repeats caught",
+      "kpi-crm": "Leads in the demo CRM",
+      "kpi-ai-calls": "AI ratings given"
+    }
+  },
+  "desk_started_at": 1000039400,
+  "fakes": {
+    "reachable": true,
+    "outbox_mode": "blind",
+    "crm_mode": "keyed",
+    "outbox": {
+      "count": 2,
+      "reminders": 0,
+      "followups": 2,
+      "messages": [
+        {
+          "to": "Ada@Example.test",
+          "subject": "Thanks for your message"
+        },
+        {
+          "to": "grace@example.test",
+          "subject": "Thanks for your message"
+        }
+      ]
+    },
+    "crm": {
+      "count": 3,
+      "rows": [
+        {
+          "lead_id": "L3f9a1c2b4d5e",
+          "record": {
+            "name": "Ada Example",
+            "email": "Ada@Example.test"
+          }
+        },
+        {
+          "lead_id": "L7b2e9d0c1a34",
+          "record": {
+            "name": "Grace Sample",
+            "email": "grace@example.test"
+          }
+        },
+        {
+          "lead_id": "L0c4d8e2f6a19",
+          "record": {
+            "name": "Linus Demo",
+            "email": "linus@example.test"
+          }
+        }
+      ]
+    }
+  },
+  "ai_calls": 3,
+  "crash": {
+    "available": false,
+    "armed": null,
+    "points": [
+      "A",
+      "A2",
+      "B",
+      "D1",
+      "D2"
+    ]
+  },
+  "people": [
+    {
+      "person": 1,
+      "name": "Ada Example",
+      "company": "Example Ltd"
+    },
+    {
+      "person": 2,
+      "name": "Grace Sample",
+      "company": "Sample Works"
+    },
+    {
+      "person": 3,
+      "name": "Linus Demo",
+      "company": "Demo Systems"
+    },
+    {
+      "person": 4,
+      "name": "Margaret Test",
+      "company": null
+    },
+    {
+      "person": 5,
+      "name": "Alan Birch",
+      "company": "Birch Works"
+    },
+    {
+      "person": 6,
+      "name": "Edsger Lund",
+      "company": null
+    }
+  ]
+}

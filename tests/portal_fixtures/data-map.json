@@ -1,0 +1,150 @@
+{
+  "mail_sender": null,
+  "ai_step": {
+    "receives": [
+      "lead_id",
+      "email_key"
+    ],
+    "never_receives": [
+      "name",
+      "phone",
+      "company",
+      "message"
+    ],
+    "mode": "recorded",
+    "note": "lists the inputs the AI is given, derived from its signature; it does not prove what a live AI looks up by id"
+  },
+  "stored": [
+    {
+      "field": "lead_id",
+      "where": "desk records",
+      "purpose": "number each lead, on every page; the AI is given it",
+      "sent_to": [
+        "Mail step",
+        "CRM (stand-in)",
+        "AI"
+      ]
+    },
+    {
+      "field": "name",
+      "where": "desk records",
+      "purpose": "show who the lead is",
+      "sent_to": [
+        "Mail step",
+        "CRM (stand-in)"
+      ]
+    },
+    {
+      "field": "email",
+      "where": "desk records",
+      "purpose": "identify the lead and send the follow-up",
+      "sent_to": [
+        "Mail step",
+        "CRM (stand-in)",
+        "AI"
+      ]
+    },
+    {
+      "field": "phone",
+      "where": "desk records",
+      "purpose": "a number a person could call; the desk makes no phone calls (kept when given)",
+      "sent_to": []
+    },
+    {
+      "field": "company",
+      "where": "desk records",
+      "purpose": "show who the lead works for (kept when given)",
+      "sent_to": [
+        "CRM (stand-in)"
+      ]
+    },
+    {
+      "field": "message",
+      "where": "desk records",
+      "purpose": "keep what the lead wrote (kept when given)",
+      "sent_to": []
+    },
+    {
+      "field": "request_payload",
+      "where": "desk records",
+      "purpose": "keep the whole request as it arrived, to show what a repeat changed",
+      "sent_to": []
+    },
+    {
+      "field": "request_id",
+      "where": "desk records",
+      "purpose": "recognise a request that arrives again",
+      "sent_to": []
+    },
+    {
+      "field": "door",
+      "where": "desk records",
+      "purpose": "show which source the request came through",
+      "sent_to": [
+        "CRM (stand-in)"
+      ]
+    },
+    {
+      "field": "times",
+      "where": "desk records",
+      "purpose": "show when each request arrived and when each step happened",
+      "sent_to": []
+    },
+    {
+      "field": "follow_up_state",
+      "where": "desk records",
+      "purpose": "show whether the follow-up was sent",
+      "sent_to": []
+    },
+    {
+      "field": "ai_label",
+      "where": "desk records",
+      "purpose": "keep the AI's answer: hot, warm or cold",
+      "sent_to": [
+        "CRM (stand-in)"
+      ]
+    },
+    {
+      "field": "later_decision",
+      "where": "desk records",
+      "purpose": "keep who approved or denied a later message, through which channel and when (approval mode only)",
+      "sent_to": []
+    },
+    {
+      "field": "lead_owner",
+      "where": "desk records",
+      "purpose": "show which person on the list owns a new lead; named in the reminder email",
+      "sent_to": [
+        "Mail step"
+      ]
+    },
+    {
+      "field": "lead_stage",
+      "where": "desk records",
+      "purpose": "show how far a new lead has come; named in the reminder email",
+      "sent_to": [
+        "Mail step"
+      ]
+    },
+    {
+      "field": "reminder_state",
+      "where": "desk records",
+      "purpose": "show whether a reminder email was sent for a lead nobody replied to",
+      "sent_to": []
+    }
+  ],
+  "access": {
+    "bind": "127.0.0.1",
+    "portal_pages_read_only": true,
+    "portal_actions": [
+      "retry",
+      "resolve",
+      "demo_controls"
+    ],
+    "host_check": true,
+    "origin_check": true,
+    "login": false,
+    "encryption_at_rest": false,
+    "masking": false
+  }
+}

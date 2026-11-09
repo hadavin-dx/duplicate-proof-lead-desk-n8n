@@ -1,0 +1,124 @@
+# Settings
+
+Every setting has a default in `Config` (`src/lead_desk/config.py`) and an environment variable. A bad value stops the start with an error.
+
+| Setting | Environment variable | Default | Meaning |
+|---|---|---|---|
+| `db_path` | `DESK_DB_PATH` | `./data/desk.sqlite3` | the desk's records |
+| `bind` | `DESK_BIND` | `127.0.0.1` | address the desk listens on. The default is this computer only. Any other address (the all-zeros address above all) lets other computers read every lead: there is no login, and the desk prints a warning at start-up. With any real service set (`DESK_CRM` not `fake`, `DESK_OUTBOX=smtp_provider` or `DESK_QUALIFIER=live_claude`) the desk refuses to start on any address that is not this computer's own, because anyone who could reach the port could write to that service |
+| `port` | `DESK_PORT` | `8765` | desk port (0 = pick a free one, used by tests) |
+| `adapters` | `DESK_ADAPTERS` | `demo` | the adapter set; only `demo` exists (the demo CRM, the mail stand-ins and the portal) |
+| `qualifier` | `DESK_QUALIFIER` | `recorded` | the AI step: `recorded` (pre-written replies from a list; the value is still called `recorded`) or `live_claude` (a live model; needs the `DESK_LIVE_*` settings below) |
+| `outbox` | `DESK_OUTBOX` | `http` | the sender: `http` (the demo servers), `smtp` (an SMTP mail server) or `smtp_provider` (a mail account at a provider, over an encrypted connection); the settings of the last two are listed under "Sender settings" below. Both real-mail senders have only been run against local test mail servers |
+| `crm` | `DESK_CRM` | `fake` | the CRM: `fake` (the demo servers) or `hubspot` (a free HubSpot account); its settings are listed under "CRM settings" below. The desk's HubSpot adapter has only been run against a local stand-in server; only `scripts/hubspot_probe.py` touched a real account (one free account, logs not shipped) |
+| `later_mode` | `DESK_LATER_MODE` | `off` | `off`: a repeat that brings new details is only listed, and the desk refuses a decision on it. `approval`: a person approves or denies it (one decision per repeat, the first one wins; it is stored in the desk only and changes nothing else). Switching needs a restart; stored decisions stay |
+| `approvers_path` | `DESK_APPROVERS_FILE` | none (in approval mode the loader uses the `approvers.json` inside `demo_only/`) | a JSON file `{"label": "...", "approvers": [{"id": "appr-01", "name": "..."}]}` (the label is optional): who may decide. Ids are lower-case letters, digits and `-`, at most 32 characters; names are unique, one line, at most 64 characters; the label is one line of at most 64 characters; the file is at most 16384 bytes; an empty list is refused in approval mode. Refused when approval mode is off |
+| `leadflow_path` | `DESK_LEADFLOW_FILE` | none (off) | a JSON file with the lead owner list (`rota`), the lead stages (`steps`, `closed`, `first`, `after_followup`, `reminder_until`) and the optional reminder wait `nudge_after_seconds` (see `demo_only/leadflow.json`). Unset, empty or the exact lower-case word `off` turns the feature off and the desk behaves as before; a file really named `off` cannot be used. The file is read once at start; a refused file stops the start (exit 4). The demo start scripts (`scripts/start_all.ps1`, `scripts/start_all.sh`) name `demo_only/leadflow.json` unless you set `DESK_LEADFLOW_FILE` yourself; set `DESK_LEADFLOW_FILE=off` to turn the feature off there. WARNING: it writes the CRM lead status field, so automations in the CRM you connect that watch that field react (`docs/limits.md`) |
+| `nudge_to` | `DESK_NUDGE_TO` | none | the one address that gets reminder emails; never logged. Refused unless `DESK_LEADFLOW_FILE` names a file, and refused when the file turns reminders on but this is not set. The demo start scripts set `reminder@example.test` unless you set it yourself (only when the feature is on) |
+| `fakes_host`, `fakes_port` | `DESK_FAKES_HOST`, `DESK_FAKES_PORT` | `127.0.0.1`, `8766` | where the demo CRM and outbox listen; this computer only: `localhost` or a loopback address, anything else is refused |
+| (both above) | `DESK_FAKES_URL` | built from the two above | one `http` address with host and port; wins over the two above |
+| `replies_path` | `DESK_REPLIES_PATH` | none (the loader uses the `replies.json` inside `demo_only/`) | the pre-written AI replies |
+| `send_timeout_seconds` | `DESK_SEND_TIMEOUT_SECONDS` | `5.0` | wait per network step, also for the CRM call |
+| `size_cap_bytes` | `DESK_SIZE_CAP_BYTES` | `65536` | largest request body accepted (larger gets 413) |
+| `stall_seconds` | `DESK_STALL_SECONDS` | `120` | after this long an unfinished item shows as `stalled` on the review list |
+| `allowed_hosts` | `DESK_ALLOWED_HOSTS` | none | extra names a caller may use in the `Host` header (comma list, lower case). The desk always accepts `127.0.0.1`, `localhost`, `[::1]` and its bind address (not when the bind address is a wildcard, the all-zeros address or `::`, which is never a host name; `scripts/feed.py` then calls `127.0.0.1`). Each name must be a plain host name (letters, digits and hyphens in dot-separated parts of 1 to 63 characters, none starting or ending with a hyphen) or an IPv6 address in brackets; wildcard addresses are refused. n8n in Docker reaches the desk by the host name Docker gives the computer: set `DESK_BIND` to the address the desk must listen on and `DESK_ALLOWED_HOSTS` to that name |
+
+### Number settings: what is accepted
+
+A number setting is plain ASCII text: digits with an optional sign (whole numbers), or digits with an optional point and exponent (seconds and money). Spaces, tabs and line ends around the value are ignored (`set DESK_PORT=8765 ` in cmd.exe works). A space inside the number, underscores, digits of other scripts (and a no-break space), an empty value, `nan`, `inf`, an exponent or a point in a whole number, and text such as `0x10` are refused. A value outside its range is refused too, with a message that names the setting (never the value) and the desk ends with exit code 4. The ceilings are named constants in `src/lead_desk/constants.py`. An address setting (`DESK_FAKES_URL`, `DESK_LIVE_BASE_URL`, `DESK_HUBSPOT_BASE_URL`) that cannot be read as an address, such as `http://[/`, is refused the same way ("... is not a valid address"). The 600-second ceiling of the two plain-SMTP/send timeouts is a sanity bound only: the desk itself cuts every send at 9 seconds.
+
+| Setting | Accepted values |
+|---|---|
+| `DESK_PORT` | 0 to 65535 |
+| `DESK_FAKES_PORT`, `DESK_SMTP_PORT`, `DESK_SMTPP_PORT` | 1 to 65535 |
+| `DESK_SIZE_CAP_BYTES` | 1 to 16777216 (`SIZE_CAP_BYTES_MAX`) |
+| `DESK_STALL_SECONDS` | 0 to 86400 (`STALL_SECONDS_MAX`). 0 is accepted: every open receipt then counts as stalled at once, so the reaper decides it at its next pass and the review list shows it immediately (early, not wrong: a verdict is written once) |
+| `DESK_SEND_TIMEOUT_SECONDS`, `DESK_SMTP_TIMEOUT_SECONDS` | above 0, at most 600 (`SEND_TIMEOUT_SECONDS_MAX`); the desk still cuts every call at 9 seconds |
+| `DESK_SMTPP_TIMEOUT_SECONDS`, `DESK_HUBSPOT_TIMEOUT_SECONDS` | above 0, at most 9 (`CALL_DEADLINE_MAX_SECONDS`) |
+| `DESK_SMTPP_MAX_SENDS`, `DESK_HUBSPOT_MAX_CALLS` | 1 to 10000 (`CAP_COUNT_MAX`) |
+| `DESK_HUBSPOT_MAX_429_RETRIES` | 0 to 5 |
+| `nudge_after_seconds` (in the leadflow file) | 1 to 2678400 (31 days, `NUDGE_AFTER_MAX_SECONDS`); see "The leadflow file" below |
+| `DESK_LIVE_TIMEOUT_SECONDS`, `DESK_LIVE_MAX_TOKENS` | above 0 and at most 9 seconds; 1 to `LIVE_MAX_TOKENS_MAX` |
+| `REAL_PERSONS` (real-services script) | at most 1000 (`REAL_PERSONS_MAX`); `REAL_HUBSPOT_READBACK_MAX_CALLS` at most 10000 |
+
+### The leadflow file: every bound the desk enforces
+
+The file named by `DESK_LEADFLOW_FILE` is read once at start; anything outside these bounds stops the start with exit 4 and a message that names the entry and never prints a value (constants in `constants.py`, checks in `config.py`).
+
+| Part | Bound |
+|---|---|
+| File | at most 16384 bytes (`LEADFLOW_FILE_MAX_BYTES`); only the keys `rota`, `steps`, `closed`, `first`, `after_followup`, `reminder_until` and `nudge_after_seconds` are allowed, any other key is refused |
+| `rota` (lead owners) | 1 to 20 entries (`LEADFLOW_ROTA_MAX`); each entry has an `id`, a `name` and an optional `crm_owner_id`; ids and names are not used twice |
+| An id (owner or step) | lower-case letter or digit first, then lower-case letters, digits and `-`, at most 32 characters (`[a-z0-9][a-z0-9-]{0,31}`) |
+| An owner `name` | 1 to 64 characters on one line (`LEADFLOW_NAME_MAX`) |
+| `steps` | 3 to 12 entries (`LEADFLOW_STEPS_MAX`); `closed` is a separate last step and is not counted; each entry has an `id`, a `label` and a `crm_status` |
+| A step `label` | 1 to 32 characters on one line (`LEADFLOW_LABEL_MAX`) |
+| `crm_owner_id`, `crm_status` | empty (owner only) or letters, digits, `_` and `-`, 1 to 64 characters (`[A-Za-z0-9_-]{1,64}`) |
+| `first`, `after_followup`, `reminder_until` | each is the id of a step in `steps`, and `first` comes before `after_followup`, which comes before `reminder_until` |
+| `nudge_after_seconds` | absent or `null` turns reminders off; otherwise a whole number from 1 to 2678400 (31 days, `NUDGE_AFTER_MAX_SECONDS`) |
+
+Two rules about reminders are checked when the desk is built (so a desk made in a program is refused too, not only the start script): reminders switched on in the file need `DESK_NUDGE_TO`, and `DESK_NUDGE_TO` set while the file turns reminders off is refused as well.
+
+How reminders behave: a lead is reminded once when `nudge_after_seconds` have passed since it was created and its step is still before `reminder_until`. The desk does not look at the follow-up state: a lead whose follow-up email has not been sent yet can be reminded too (the reminder text only names the lead number prefix, the owner and the step). A lead created while the feature was off has no owner, no step and no reminder, and the step route answers `no_state` for it: switching the feature on later affects new leads only.
+
+### Sender settings
+
+`DESK_OUTBOX=smtp`:
+
+The default addresses below end in `example.test`, a name reserved for examples. They are used only on the mail step, which never passes an address to a CRM. A real HubSpot account refused a contact whose address ended in `.test` (`docs/hubspot-probe.md`), so any made-up address of a lead that goes into a real CRM must end in a real domain such as `example.com`.
+
+* `DESK_SMTP_HOST` (default `127.0.0.1`; must be a loopback IP address: the desk makes no name lookup, refuses a name and refuses any address that is not this computer's. The desk cannot tell what listens there: a real mail relay or a tunnel to a real server on `127.0.0.1` is the owner's responsibility, and the demo banner would then be wrong), `DESK_SMTP_PORT` (default 2525), `DESK_SMTP_FROM` (default `desk@example.test`), `DESK_SMTP_MESSAGE_ID_DOMAIN` (default `example.test`), `DESK_SMTP_TIMEOUT_SECONDS` (default: the same as `DESK_SEND_TIMEOUT_SECONDS`).
+
+`DESK_OUTBOX=smtp_provider`:
+
+* Required: `DESK_SMTPP_HOST` (lower-cased by the desk), `DESK_SMTPP_USER`, `DESK_SMTPP_PASSWORD_FILE`, `DESK_SMTPP_FROM`, `DESK_SMTPP_RECIPIENTS`, `DESK_SMTPP_MAX_SENDS`. Optional: `DESK_SMTPP_SECURITY` (`starttls`, the default, or `ssl`) and `DESK_SMTPP_PORT` (default 587 for `starttls`, 465 for `ssl`).
+* `DESK_SMTPP_PASSWORD_FILE`: the path of a one-line file of at most 4096 bytes; never the password itself.
+* `DESK_SMTPP_FROM`, `DESK_SMTPP_RECIPIENTS` (your own inboxes, comma separated), `DESK_SMTPP_MESSAGE_ID_DOMAIN` (default `example.invalid`), `DESK_SMTPP_TIMEOUT_SECONDS` (default: the same as `DESK_SEND_TIMEOUT_SECONDS`).
+* `DESK_SMTPP_MAX_SENDS`: required hard cap, counted per process in memory, so a restarted desk starts again at 0.
+* `DESK_SMTPP_STATS_FILE`, `DESK_SMTPP_CA_FILE`.
+
+### CRM settings (`DESK_CRM=hubspot`)
+
+* `DESK_HUBSPOT_KEY_FILE` (required): the path of a one-line key file of at most 4096 bytes, UTF-8, holding a key of at least 8 characters with no spaces or unprintable characters.
+* `DESK_HUBSPOT_MAX_CALLS`: required hard cap, counted per process in memory: a restarted desk starts again at 0, so a restart loop is not limited by it. Only the live-model spend ledger is a file that survives restarts.
+* `DESK_HUBSPOT_BASE_URL` (default: the vendor's own address, `HUBSPOT_BASE_URL` in `constants.py`), `DESK_HUBSPOT_TIMEOUT_SECONDS` (default 4.5), `DESK_HUBSPOT_MAX_429_RETRIES` (default 2), `DESK_HUBSPOT_STATS_FILE`.
+* `DESK_HUBSPOT_ALLOW_ANY_BASE_URL`: the word `yes` lifts the check that the key goes only to the vendor's own host names.
+
+Every number setting that is not a number, or is out of range, stops the start with a message that names the setting (exit code 4).
+
+### Live model step (`DESK_QUALIFIER=live_claude`)
+
+The step asks the model for one word (hot, warm or cold) and keeps no secret in code. The key is read from a file only. Money values have NO default: the desk will not start without them.
+
+| Environment variable | Meaning |
+|---|---|
+| `DESK_LIVE_MODEL` | model id (required) |
+| `DESK_LIVE_KEY_FILE` | path of the file that holds the key (required; unlike the other key and password files it has NO 4096-byte size limit: the whole file is read; keep it outside the repository; never put a key in a variable or on a command line) |
+| `DESK_LIVE_PRICE_IN_PER_MTOK`, `DESK_LIVE_PRICE_OUT_PER_MTOK`, `DESK_LIVE_PRICE_DATE` | US$ per million input and output tokens and the date you read them from the provider's price page (required; each price from 0.000001 to 1,000,000). The desk uses these prices as you give them for the whole run, never checks how old the date is and writes dollars (not prices) in the ledger: keeping the prices right is your job |
+| `DESK_LIVE_CAP_RUN_USD`, `DESK_LIVE_CAP_TOTAL_USD` | the most one run and the whole ledger may spend (required; above 0 and at most US$1,000,000; the run cap may not exceed the total) |
+| `DESK_LIVE_LEDGER_PATH`, `DESK_LIVE_RUN_ID` | the spend ledger file (a file that records the money spent; kept across restarts) and the name of this run (required) |
+| `DESK_LIVE_BASE_URL` | service address; default is the provider's public address (`LIVE_DEFAULT_BASE_URL` in `constants.py`); plain `http` only for the local computer. The key is sent to this address, so the settings refuse any other address than the provider's own or this computer, wherever they are made (the desk, `scripts/run_real_check.py`, `scripts/run_live_check.py`) |
+| `DESK_LIVE_ALLOW_ANY_BASE_URL` | the word `yes` lifts that refusal (the same idea as `DESK_HUBSPOT_ALLOW_ANY_BASE_URL`); `scripts/run_real_check.py` reads it from its config file only |
+| `DESK_LIVE_API_VERSION`, `DESK_LIVE_EFFORT`, `DESK_LIVE_TIMEOUT_SECONDS`, `DESK_LIVE_MAX_TOKENS` | request version header (default 2026-10-21), `output_config` effort (default low), total time limit of one call in seconds (default 8, at most 9: the desk cuts every model call there), output cap in tokens (default 64; thinking tokens are billed as output and the worst-case reserve uses this number) |
+
+Each call reserves its worst-case cost in the ledger BEFORE it is sent and is refused when a cap would be passed; the reserve is replaced by the cost the service reports. A call that fails keeps its worst-case reserve (the provider may have charged it); this includes a 429 (too many requests) and a 5xx answer, because the service does not say whether it charged. If a paid answer arrives but its cost cannot be written down (the ledger is locked, or the token counts make no sense), the answer is still used and the worst-case reserve stays as its cost. A last ledger line cut off by a crash is ignored; any other unreadable line stops all spending. The step never retries inside one call: a failure becomes a retry by the desk or an item for a person. The time limit of one call is counted from the start of the call: waiting for the spend ledger counts, and no request is sent once the limit is used up. A request that was already sent is not stopped when the desk gives up waiting for it: its helper thread ends on its own, a late answer is thrown away, and the provider may still charge it (the worst-case reserve stays; the caps and the 5 automatic tries bound the total). The request format is the vendor's Messages interface; a second provider would be another `Qualifier` class. `scripts/run_live_check.py` is the check for a person with a real key: it prints counts, cost, valid-label rate, flip rate and latency only, and never prints the key. `src/lead_desk/trace.py` holds optional timing wrappers and extra crash windows for checks.
+
+
+Fixed in code, not settings (`src/lead_desk/constants.py`): the SQLite busy wait, the listen queue length, the lock retries, the connection limit `MAX_CONNECTIONS` (256), the handler thread limit `MAX_HANDLER_THREADS` (1024), the header and body deadlines (10 s each) and the busy reply's `Retry-After` (1 s).
+
+## Live-model limits that are fixed in code
+
+* A live-model key (the line in `DESK_LIVE_KEY_FILE`) shorter than 8 characters is refused (`LIVE_KEY_MIN_CHARS`).
+* A spend ledger file larger than 8,000,000 bytes stops all spending: every call is refused (`LIVE_LEDGER_FILE_MAX_BYTES`). Start a new ledger file when it gets that large.
+
+## Settings of the helper scripts (not read by the desk)
+
+* `scripts/run_real_check.py` reads its names from the config file you give it (`scripts/real-run.env.example` explains each). It refuses to start (exit code 2) when a required name is missing: `DESK_DB_PATH` (must name a file that does NOT exist yet: a new book for each run), `DESK_HUBSPOT_KEY_FILE`, `DESK_HUBSPOT_MAX_CALLS`, `REAL_HUBSPOT_READBACK_MAX_CALLS` (at least 5, at most 10000), `DESK_SMTPP_HOST`, `DESK_SMTPP_USER`, `DESK_SMTPP_PASSWORD_FILE`, `DESK_SMTPP_FROM`, `DESK_SMTPP_RECIPIENTS`, `DESK_SMTPP_MAX_SENDS`, `REAL_IMAP_1_USER`, `REAL_IMAP_1_PASSWORD_FILE`, `REAL_IMAP_2_USER` and `REAL_IMAP_2_PASSWORD_FILE`.
+* Optional names of that script: `REAL_PERSONS` (default 12, at least 8, at most 1000), `REAL_DRAIN_SECONDS` (seconds to wait for the desk, default 150), `REAL_MAIL_WAIT_SECONDS` (default 90), `REAL_MAIL_SETTLE_SECONDS` (default 10, the mail poll time: after every mail is seen once, wait this long and count once more), each of these three above 0 and at most 86,400; `REAL_RESULT_FILE` (where the JSON result goes; default `result.json` next to the database).
+* The script forces `DESK_ADAPTERS=demo`, `DESK_CRM=hubspot`, `DESK_OUTBOX=smtp_provider` and, unless you pass `--live-model`, `DESK_QUALIFIER=recorded`, whatever the file says; it also reads the other `DESK_*` names (for example `DESK_PORT`, the `DESK_HUBSPOT_*`, `DESK_SMTPP_*` and `DESK_LIVE_*` names) from the same file and gives them to the desk processes. Defaults it sets when absent: `DESK_SEND_TIMEOUT_SECONDS=8`, `DESK_HUBSPOT_ALLOW_ANY_BASE_URL=no`, `DESK_LIVE_ALLOW_ANY_BASE_URL=no`.
+* Mailboxes: blocks `REAL_IMAP_1_*`, `REAL_IMAP_2_*` and so on are read in order and stop at the first n that has no `REAL_IMAP_n_USER`; the user of block n must be the n-th address of `DESK_SMTPP_RECIPIENTS`. Per block: `USER` and `PASSWORD_FILE` (required), `HOST` (default: the mail provider's address, `MAIL_IMAP_DEFAULT_HOST` in `constants.py`), `PORT` (default 993), `CA_FILE`, `FOLDERS` (comma list; default `INBOX` and the provider's English spam folder, `MAIL_SPAM_FOLDER` in `constants.py`).
+* Exit codes of `scripts/run_real_check.py`: 0 every check in its table passed (and no contact it made was left behind); 1 stopped before calling anything (you did not answer `y`, or there was no terminal to answer on); an unexpected error after that question also ends the program with code 1 (a Python traceback); 2 refused at the start (a missing or bad setting, or `--assume-yes` without `--dry-fakes`); 3 the run could not finish, a check failed, the book could not be read, or contacts were left behind.
+* `scripts/n8n_api.py` reads `N8N_URL` (default `http://127.0.0.1:5679`) and `N8N_API_KEY_FILE` (the path of a one-line file with the n8n API key; required). n8n's own names such as `N8N_PORT` are n8n's, not this repository's; they appear in `docs/n8n-recipe.md`. `scripts/run_live_check.py` takes command-line flags, not settings names: `--key-file`, `--base-url`, `--ledger`, `--cap-run`, `--cap-total`, `--price-date` and one `--model ID=IN_PRICE,OUT_PRICE` per model, and optionally `--max-tokens`, `--effort`, `--timeout` (see the text at the top of the file).
+* `LEAD_DESK_LOAD_N` and `LEAD_DESK_LOAD_RETRY` are read only by one optional measurement test (`tests/test_server_hardening.py`, `test_measure_burst`): with `LEAD_DESK_LOAD_N=<number of simultaneous connections>` it fires that burst at a desk it starts itself and prints the status counts (`LEAD_DESK_LOAD_RETRY=1` lets the senders retry a refused connection); without `LEAD_DESK_LOAD_N` the test is skipped.
+* `DPLD_REQUIRE_SCAN` and `GITLEAKS_BIN` are read only by `tests/test_hygiene.py`. `DPLD_REQUIRE_SCAN` acts on any non-empty value (even `0`): it makes a missing gitleaks program a failure and also scans the git history. `GITLEAKS_BIN` is the path of the gitleaks program (if it is not set, the program is looked up on `PATH`).
+* `DPLD_REQUIRE_DEMO` is read only by `tests/conftest.py`. With `DPLD_REQUIRE_DEMO=1` a checkout that has no `demo_only` folder stops the test run at the start (exit code 2) instead of skipping the test files that need it (CI sets it, so a lost folder cannot make the run look green). Without it a missing folder skips each such test file as one item and the other files still run.

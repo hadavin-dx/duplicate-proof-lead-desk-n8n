@@ -1,0 +1,101 @@
+/* Leads page and lead drawer. Tokens from app.css only. */
+.sumstrip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--r-card); box-shadow: var(--shadow); }
+.sumstat { display: grid; gap: var(--s1); padding: var(--s4) var(--s5); }
+.sumstat + .sumstat { border-left: 1px solid var(--border-soft); }
+.sumstat-value { font-size: var(--t-lg); font-weight: 650; letter-spacing: -0.01em; }
+.toolbar { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+.toolbar-block { display: grid; gap: var(--s2); }
+.toolbar .search .input { width: 400px; max-width: 100%; }
+.leads-count { font-size: var(--t-sm); font-variant-numeric: tabular-nums; }
+.lead-cell { display: grid; gap: 0; line-height: 1.35; }
+.lead-name { font-weight: 600; color: var(--ink); }
+.lead-mail { font-size: var(--t-sm); color: var(--ink-3); }
+.pager { display: flex; align-items: center; gap: var(--s2); padding: var(--s3) var(--s1); font-size: var(--t-sm); }
+
+.drawer-section { display: grid; gap: var(--s3); align-content: start; }
+.drawer-section h3 { font-size: var(--t-base); font-weight: 650; letter-spacing: 0; text-transform: none; color: var(--ink); }
+.drawer-section > p { font-size: var(--t-sm); }
+.drawer-body .kv { grid-template-columns: 112px 1fr; }
+
+.ledger { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; border: 1px solid var(--border-soft); border-radius: var(--r-card); background: var(--surface-2); overflow: hidden; }
+.ledger-step { position: relative; display: grid; grid-template-columns: 112px minmax(0, 1fr); align-items: center; gap: var(--s3); padding: var(--s3) var(--s4); }
+.ledger-step + .ledger-step { border-top: 1px solid var(--border-soft); }
+.ledger-value { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.ledger-ok .ledger-value { color: var(--ok-fg); }
+.ledger-extra { display: block; background: var(--surface); }
+
+.tl > li { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s4); }
+.tl-text { min-width: 0; }
+.tl time { font-size: var(--t-sm); white-space: nowrap; }
+.tl-text .faint { display: block; font-size: var(--t-sm); white-space: normal; }
+
+.diff { display: grid; gap: var(--s2); }
+.diff-row { display: grid; grid-template-columns: 96px minmax(0, 1fr) minmax(0, 1fr); gap: var(--s3); align-items: start; padding: var(--s3); border: 1px solid var(--border-soft); border-radius: var(--r-ctl); }
+.diff-field { font-weight: 600; }
+.diff-old, .diff-new { display: grid; gap: var(--s1); overflow-wrap: anywhere; }
+.diff-old span:last-child { color: var(--ink-2); }
+.diff-new span:last-child { color: var(--warn-fg); background: var(--warn-bg); padding: 0 var(--s1); border-radius: var(--r-ctl); justify-self: start; }
+.later-card { display: grid; gap: var(--s2); padding: var(--s3); border: 1px solid var(--border-soft); border-radius: var(--r-ctl); }
+.later-card + .later-card { margin-top: var(--s2); }
+.later-meta { color: var(--ink-2); }
+.later-value { white-space: pre-wrap; max-height: 12rem; overflow: auto; }
+details.details .kv { margin-top: var(--s3); grid-template-columns: max-content 1fr; font-size: var(--t-sm); }
+.tl > li::before { background: var(--accent); }
+.tl > li.tl-ok::before { background: var(--ok-solid); } .tl > li.tl-warn::before { background: var(--warn-solid); } .tl > li.tl-bad::before { background: var(--bad-solid); }
+.tl > li.tl-info::before { background: var(--info-solid); } .tl > li.tl-calm::before { background: var(--calm-solid); }
+.tl > li.tl-pending::before { background: var(--pending-solid); } .tl > li.tl-hot::before { background: var(--hot-solid); } .tl > li.tl-teal::before { background: var(--teal-solid); } .tl > li.tl-neutral::before { background: var(--neutral-solid); }
+.drawer-body { padding-bottom: calc(var(--s7) + var(--s4)); scroll-padding-bottom: var(--s7); }
+
+.hide-switch { display: inline-flex; align-items: center; gap: var(--s2); font-size: var(--t-sm); color: var(--ink); cursor: pointer; }
+.hide-switch input { cursor: pointer; }
+/* the switch and its caveat: always visible, under the switch below 1500 px and beside it above */
+.hide-switch { flex-wrap: nowrap; height: 36px; }
+.hide-switch .hide-note { white-space: nowrap; font-size: var(--t-sm); }
+.hide-note::before { content: "("; } .hide-note::after { content: ")"; }
+
+.sumstrip { position: relative; overflow: hidden; background: var(--tile-glow), var(--surface); }
+.sumstrip::before { content: ""; position: absolute; left: var(--s4); right: var(--s4); top: 0; height: 2px; background: var(--grad-hair); opacity: .85; }
+.sumstat-value { font-size: var(--t-xl); }
+.tl-key { font-size: var(--t-xs); }
+
+.search-hint { font-size: var(--t-xs); white-space: nowrap; }
+.lead-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 26ch; display: block; }
+
+/* lead owner and lead stage columns (they sit before "Last change", so every column rule above keeps its column) */
+.lead-owner { display: block; max-width: 10rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.leads-out .table td:nth-child(8) { white-space: nowrap; }
+@media (max-width: 1300px) {
+  .leads-out .table th:nth-child(3), .leads-out .table td:nth-child(3),
+  .leads-out .table th:nth-child(6), .leads-out .table td:nth-child(6) { display: none; } /* Source and Requests: hidden up to 1300 px so that no cell wraps at 1280 (tests/test_portal_layout.py pins this number to contract.md) */
+}
+.step-control { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+.step-now { font-weight: 600; }
+.step-crm-warning { flex-basis: 100%; margin: var(--s2) 0 0; }
+.step-note { font-size: var(--t-xs); }
+.step-hint { flex-basis: 100%; }
+.select-sm { height: 28px; font-size: var(--t-sm); }
+.approval { display: grid; gap: var(--s2); padding-top: var(--s2); border-top: 1px dashed var(--border-soft); }
+.approval-row { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2); }
+.approval-note { font-size: var(--t-xs); }
+.decided-line { display: flex; align-items: flex-start; gap: var(--s2); margin: 0; font-weight: 600; color: var(--ink); }
+
+/* a wide table scrolls inside its card, never the page; a masked or long address stays on one line */
+.leads-out { min-width: 0; }
+.leads-out .table-wrap { width: 100%; min-width: 0; }
+.leads-out .table { width: 100%; }
+.lead-cell, .lead-mail, .lead-mail .guard, .lead-mail .guard-val { white-space: nowrap; }
+.lead-mail { overflow: hidden; text-overflow: ellipsis; max-width: 26ch; }
+/* a masked or long value is clipped INSIDE its own span; the eye button sits outside the clip, with a gap, so it never covers text */
+.lead-cell { min-width: 0; }
+.lead-name:has(.guard), .lead-mail:has(.guard) { overflow: visible; display: flex; min-width: 0; max-width: 100%; }
+.lead-cell .guard { display: flex; align-items: center; gap: var(--s2); min-width: 0; max-width: 100%; }
+.lead-cell .guard-val { flex: 0 1 auto; min-width: 0; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; }
+.lead-cell .eye-btn { flex: none; }
+.chip-with-note { display: grid; gap: var(--s1); justify-items: start; }
+.leads-out .table td:last-child { min-width: 7.5rem; }
+
+/* owner initial and a step chip (the colour follows the step) */
+.lead-owner { display: inline-flex; align-items: center; gap: var(--s2); }
+.owner-name { overflow: hidden; text-overflow: ellipsis; }
+.avatar { flex: none; width: 22px; height: 22px; border-radius: var(--r-pill); display: inline-grid; place-items: center; font-size: var(--t-xs); font-weight: 700; background: var(--accent-wash); color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent); }
+.ledger-value .pill { white-space: normal; text-align: left; }

@@ -1,0 +1,8 @@
+{
+  "label": "demo approver",
+  "approvers": [
+    {"id": "appr-01", "name": "Approver One"},
+    {"id": "appr-02", "name": "Approver Two"},
+    {"id": "appr-03", "name": "Approver Three"}
+  ]
+}
