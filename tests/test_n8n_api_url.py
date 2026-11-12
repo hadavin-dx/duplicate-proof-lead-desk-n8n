@@ -112,11 +112,18 @@ def test_an_address_that_cannot_be_read_is_a_clean_refusal_not_a_traceback(
     assert "tunnel" in str(e.value)
 
 
+def _drain(handler: BaseHTTPRequestHandler) -> None:
+    """Read the request body BEFORE answering: a fake that answers and closes with the body unread makes the
+    system reset the connection on Windows, and the client then loses the answer (WinError 10053)."""
+    handler.rfile.read(int(handler.headers.get("Content-Length") or 0))
+
+
 class _Recorder(BaseHTTPRequestHandler):
     log: list[dict[str, str]]
     redirect_to: str | None = None
 
     def do_GET(self) -> None:
+        _drain(self)
         type(self).log.append({k.lower(): v for k, v in self.headers.items()})
         if self.redirect_to:
             self.send_response(302)
@@ -146,6 +153,7 @@ class _ListThenRedirect(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self) -> None:
+        _drain(self)
         self.send_response(302)
         self.send_header("Location", "http://127.0.0.1:9/elsewhere")
         self.send_header("Content-Length", "0")
@@ -234,6 +242,7 @@ def _fixed(status: int, body: bytes) -> type[BaseHTTPRequestHandler]:
 
     class Fixed(BaseHTTPRequestHandler):
         def _answer(self) -> None:
+            _drain(self)
             self.send_response(status)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -480,6 +489,7 @@ def _short_body(status: int) -> type[BaseHTTPRequestHandler]:
 
     class Short(BaseHTTPRequestHandler):
         def _answer(self) -> None:
+            _drain(self)
             self.send_response(status)
             self.send_header("Content-Length", "100")
             self.end_headers()
