@@ -91,3 +91,10 @@ regexes = ['''^([0-9a-f]{40}|[0-9a-f]{64})$''']
 paths = ['''requirements-dev(-win)?\.txt$''', '''\.github[/\\]workflows[/\\][a-z]+\.yml$''']
 
 # Global allowlist: none by path. Add an entry here only as regex plus a stated reason, never a whole file.
+[[allowlists]]
+description = "The SonarQube Cloud project key in sonar-project.properties: an identifier shown on a public dashboard, not a secret"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+regexes = ['''^sonar\.projectKey=hadavin-dx_[a-z0-9-]+$''']
+paths = ['''(^|[/\\])sonar-project\.properties$''']
