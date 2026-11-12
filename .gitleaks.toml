@@ -97,4 +97,4 @@ targetRules = ["generic-api-key"]
 condition = "AND"
 regexTarget = "line"
 regexes = ['''^sonar\.projectKey=hadavin-dx_[a-z0-9-]+$''']
-paths = ['''(^|[/\])sonar-project\.properties$''']
+paths = ['''(^|[/\\])sonar-project\.properties$''']
