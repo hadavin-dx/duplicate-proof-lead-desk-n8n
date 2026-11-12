@@ -490,10 +490,10 @@ def _lead_detail(desk: Desk, lead_id: str) -> tuple[int, dict[str, Any]]:
     lead_row = dict(zip(_LEAD_FIELDS, lead, strict=True))
     followup_row = dict(zip(_FOLLOWUP_KEYS, followup, strict=True))
     labels = _step_labels(desk)
-    owner, step, step_rank, owner_done, step_done, tries, reminder = (None,) * 7
+    owner, step, reminder = (None,) * 3
     owner_id = None
     if state is not None:
-        owner_id, owner, step, step_rank, owner_done, step_done, tries, reminder = state
+        owner_id, owner, step, _step_rank, _owner_done, _step_done, _tries, reminder = state
     approval = None
     if desk.config.later_mode == "approval":  # the names come from the list the desk was started with
         approval = {

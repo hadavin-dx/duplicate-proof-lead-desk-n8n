@@ -95,6 +95,6 @@ paths = ['''requirements-dev(-win)?\.txt$''', '''\.github[/\\]workflows[/\\][a-z
 description = "The SonarQube Cloud project key in sonar-project.properties: an identifier shown on a public dashboard, not a secret"
 targetRules = ["generic-api-key"]
 condition = "AND"
-regexTarget = "line"
-regexes = ['''^sonar\.projectKey=hadavin-dx_[a-z0-9-]+$''']
+regexTarget = "match"  # the matched text only: "line" carries the line break before it, so ^ fails on every line but the first
+regexes = ['''^sonar\.projectKey=hadavin-dx_duplicate-proof-lead-desk-n8n$''']
 paths = ['''(^|[/\\])sonar-project\.properties$''']

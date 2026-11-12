@@ -263,7 +263,7 @@ def read_approvers(path: Path) -> tuple[tuple[tuple[str, str], ...], str]:
         raise SettingRefused("the approvers file is too big")
     try:
         data = json.loads(raw.decode("utf-8"))
-    except (UnicodeError, ValueError, RecursionError):
+    except (ValueError, RecursionError):  # UnicodeError is a ValueError
         raise SettingRefused("the approvers file is not valid JSON text") from None
     listed = data.get("approvers") if isinstance(data, dict) else None
     label = data.get("label", "") if isinstance(data, dict) else ""
@@ -386,7 +386,7 @@ def _read_leadflow(path: Path) -> Leadflow:
         raise SettingRefused("DESK_LEADFLOW_FILE is too big")
     try:
         data = json.loads(raw.decode("utf-8"))
-    except (UnicodeError, ValueError, RecursionError):
+    except (ValueError, RecursionError):  # UnicodeError is a ValueError
         raise SettingRefused("DESK_LEADFLOW_FILE is not valid JSON text") from None
     if not isinstance(data, dict) or not _LEADFLOW_NEEDED <= set(data) <= _LEADFLOW_TOP_KEYS:
         raise SettingRefused(

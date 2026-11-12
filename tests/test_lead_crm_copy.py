@@ -331,6 +331,28 @@ def test_mirror_owner_missing_or_blank_copies_step_only(env) -> None:
     assert _pass(rig)["mirrored"] == 0 and len(crm.set_fields_calls) == 4
 
 
+def test_mirror_call_keeps_the_values_of_its_own_row(env, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The CRM call is handed to a worker thread that may run late (an abandoned worker). Here every call is held and
+    # only run after the pass has moved on to the next row: each must still send the values of its own row.
+    crm = CountingCrm()
+    rig = env.rig(leadflow=_flow(o_1="H1", o_2="H2"), crm=crm)
+    a = rig.desk.handle("form", "k-1", lead(email="a@example.test")).body["lead_id"]  # o-1
+    b = rig.desk.handle("form", "k-2", lead(email="b@example.test")).body["lead_id"]  # o-2
+    held: list[Any] = []
+
+    def hold(kind: str, fn: Any, budget: float, on_timeout: Any, **kw: Any) -> None:
+        held.append(fn)  # not run now: the loop goes on to the next row first
+
+    monkeypatch.setattr(rig.desk, "_bounded", hold)
+    _pass(rig)
+    assert len(held) == 2 and crm.set_fields_calls == []
+    for fn in held:
+        fn()
+    assert sorted(crm.set_fields_calls) == sorted(
+        [(a, "a@example.test", "H1", "ATTEMPTED_TO_CONTACT"), (b, "b@example.test", "H2", "ATTEMPTED_TO_CONTACT")]
+    )
+
+
 def test_reaper_stage_budgets(env, monkeypatch: pytest.MonkeyPatch) -> None:
     crm = _FlakyCrm()
     rig = env.rig(leadflow=_flow(), crm=crm)

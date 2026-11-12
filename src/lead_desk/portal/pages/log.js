@@ -58,6 +58,7 @@
       // three or more repeats in a row from one lead become one line; the button shows them all
       function groupRepeats(list) {
         var out = [], i = 0;
+        function openRun(k) { opened[k] = 1; render(true); }
         while (i < list.length) {
           var r = list[i], j = i + 1;
           if (r.result === 'duplicate' && r.lead_name) {
@@ -65,7 +66,7 @@
           }
           var key = r.request_id + '|' + r.received_at;
           if (j - i >= 3 && !opened[key]) {
-            out.push(Object.assign({}, r, { _n: j - i, _key: key, _open: function (k) { opened[k] = 1; render(true); } }));
+            out.push(Object.assign({}, r, { _n: j - i, _key: key, _open: openRun }));
           } else out.push.apply(out, list.slice(i, j));
           i = j;
         }

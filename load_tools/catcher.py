@@ -88,7 +88,7 @@ class Catcher:
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
             await self._session(reader, writer)
-        except (OSError, asyncio.IncompleteReadError, asyncio.LimitOverrunError, TimeoutError):
+        except (OSError, asyncio.IncompleteReadError, asyncio.LimitOverrunError):
             pass
         finally:
             writer.close()

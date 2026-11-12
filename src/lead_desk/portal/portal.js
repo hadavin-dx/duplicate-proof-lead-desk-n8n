@@ -468,10 +468,11 @@
   var pages = Object.create(null); // no inherited names: an id from the address bar can only hit a registered page
   var current = null;
   var demo = null;
+  var routeForce = false, routed = false, booted = false; // declared before the functions that read them
   function page(id, def) { pages[id] = def; def.id = id; if (booted) renderNav(); }
   function registerDemo(d) {
     demo = d || {};
-    Portal.demo = Portal.demoExt = demo;
+    window.Portal.demo = window.Portal.demoExt = demo;
     mergeLabels(demo.labels);
     var line = demo.demoLine || (demo.labels && demo.labels.demoLine);
     if (typeof line === 'string') {
@@ -573,7 +574,6 @@
     routed = true;
     pollDemo();
   }
-  var routeForce = false, routed = false, booted = false;
   function go(r) { location.hash = '#/' + r; }
 
   // ---- connection state: live dot, offline banner, restart detection
@@ -633,6 +633,7 @@
   }
   // the desk says whether the demo extension is loaded (summary.mode): no request goes to the extension's routes when it is not
   var demoTools = null;
+  var demoKnown = false, demoLoaded = false, stopDemo = null, demoMs = 0; // declared before modeSeen, which reads them
   function modeSeen(mode) {
     if (!mode || typeof mode !== 'object') return;
     if (mode.demo_tools === true) { demoTools = true; byId('demo-line').classList.remove('is-real'); pollDemo(); return; }
@@ -640,7 +641,7 @@
     if (stopDemo) { stopDemo(); stopDemo = null; }
     demoKnown = true; state.demo = null; sourceChip(false);
     try { window.localStorage.removeItem('lead-desk-demo-line'); } catch (e) { /* storage blocked */ }
-    if (demo && !demoLoaded && pages.demo) { delete pages.demo; demo = null; Portal.demo = Portal.demoExt = null; renderNav(); if (current === 'demo') go('overview'); }
+    if (demo && !demoLoaded && pages.demo) { delete pages.demo; demo = null; window.Portal.demo = window.Portal.demoExt = null; renderNav(); if (current === 'demo') go('overview'); }
     var strip = byId('demo-line');
     delete strip.dataset.placeholder;
     var REAL_NAMES = { crm: 'CRM', mail: 'mail', ai: 'AI step' };
@@ -658,7 +659,6 @@
   }
 
   // ---- demo extension discovery: 200 = load it, 404 = none, anything else = say the source is not confirmed
-  var demoKnown = false, demoLoaded = false, stopDemo = null, demoMs = 0;
   function sourceChip(show) {
     var slot = clear(byId('source-slot'));
     if (show) slot.appendChild(h('span', { 'class': 'chip-warn', 'data-testid': 'source-unconfirmed' }, icon('alert'), 'Demo data not confirmed'));

@@ -410,6 +410,32 @@ def test_chip_wording_and_needs_page_text_are_in_the_source() -> None:
     assert "it.kind === 'failed') ? 'btn-outline'" in needs
 
 
+# -- the request log in node: the "Show all N" button of a grouped run of repeats (tests/portal_log_probe.js)
+LOG_PROBE = Path(__file__).resolve().parent / "portal_log_probe.js"
+
+
+@needs_node
+def test_the_show_all_button_opens_a_grouped_run_of_repeats_and_it_stays_open() -> None:
+    """Four repeats in a row from one lead are one line with "Show all 4".
+
+    A click shows all four, and a later poll keeps them shown (log.js openRun, the only user path to it)."""
+    out = subprocess.run(  # noqa: S603 (fixed argument list, no shell)
+        ["node", str(LOG_PROBE), str(PORTAL_DIR)],  # noqa: S607
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+        check=True,
+    )
+    seen = json.loads(out.stdout.strip().splitlines()[-1])
+    assert isinstance(seen, list), seen
+    phases = {p["phase"]: p for p in seen}
+    assert phases["grouped"] == {"phase": "grouped", "rows": 3, "toggles": ["Show all 4"], "grouped": True}
+    assert phases["clicked"]["handlers"] == 1 and phases["clicked"]["stopped"] == 1  # the click does not reach the row
+    for name in ("clicked", "later"):
+        assert phases[name]["rows"] == 6 and phases[name]["toggles"] == [] and phases[name]["grouped"] is False, name
+
+
 # -- the pages in node: axis labels, last-update marks, the demo notice line, Retry cards, the pause flag
 @needs_node
 def test_the_activity_axis_uses_short_labels_that_fit() -> None:

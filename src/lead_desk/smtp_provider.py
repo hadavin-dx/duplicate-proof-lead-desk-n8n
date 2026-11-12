@@ -231,7 +231,7 @@ class SmtpProviderOutbox:
         password = read_secret_file(self._s.password_file)  # before any network use
         try:
             wire = _dot_stuff(self._build(send_key, subject, body))
-        except (ValueError, UnicodeError, MessageError) as e:
+        except (ValueError, MessageError) as e:
             raise SendRefused(type(e).__name__) from e
         with self._lock:
             if self.attempts >= self._s.max_sends:
@@ -310,7 +310,7 @@ class SmtpProviderOutbox:
         try:
             conn.settimeout(min(budget.left(), 0.2))
             conn.sendall(b"QUIT" + _CRLF)
-        except (OSError, TimeoutError):
+        except OSError:  # TimeoutError is an OSError
             pass
 
 

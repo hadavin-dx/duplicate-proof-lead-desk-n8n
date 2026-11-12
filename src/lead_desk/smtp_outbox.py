@@ -221,7 +221,7 @@ class SmtpOutbox:
             raise SendRefused("empty send key")
         try:
             wire = _dot_stuff(self._build(send_key, to, subject, body))
-        except (ValueError, UnicodeError, MessageError) as e:  # ValueError covers UnicodeError; MessageError: refused
+        except (ValueError, MessageError) as e:  # ValueError covers UnicodeError; MessageError: refused
             raise SendRefused(type(e).__name__) from e
         budget = _Budget(timeout if timeout > 0 else self._s.timeout_seconds)
         sock = self._connect(budget)
@@ -289,7 +289,7 @@ class SmtpOutbox:
         try:  # polite goodbye; its failure changes nothing
             sock.settimeout(min(budget.left(), 0.2))
             sock.sendall(b"QUIT" + _CRLF)
-        except (OSError, TimeoutError):
+        except OSError:  # TimeoutError is an OSError
             pass
 
     @staticmethod

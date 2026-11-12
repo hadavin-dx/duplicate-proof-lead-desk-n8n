@@ -323,7 +323,7 @@ class PortalDemo:
         for path in (INFO_PATH, OUTBOX_PATH, CRM_PATH):
             wait = min(cfg.send_timeout_seconds, end - time.monotonic())
             got.append(_fetch_json(cfg.fakes_url + path, wait) if wait > 0 else None)
-        info, outbox, crm = got
+        info, outbox, crm = got[0], got[1], got[2]  # the loop above always adds exactly three answers
         if info is None or outbox is None or crm is None:
             return {"reachable": False, "error": ERROR_UNREACHABLE}
         messages, rows = outbox.get(KEY_MESSAGES), crm.get(KEY_ROWS)

@@ -5,6 +5,7 @@ transaction is open. Logs carry exception class names only (no addresses, no nam
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import re
@@ -770,7 +771,7 @@ class Desk:
             )
             .fetchall()
         )
-        for lead_id, email_key, owner_id, step, rank_sent, tries_before in rows:
+        for lead_id, email_key, owner_id, step, rank_sent, _tries_before in rows:
             if self._stopping() or time.monotonic() - started >= MIRROR_PASS_SECONDS:
                 return
             owner_sent = crm_owner_of.get(owner_id, "") if owner_id in json.loads(copyable) else ""
@@ -778,7 +779,9 @@ class Desk:
             try:
                 self._bounded(
                     "crm",
-                    lambda: self.crm.set_fields(lead_id, email_key, owner_sent, status_sent),
+                    # partial, not a lambda: this row's values are bound here, so a worker that runs late still sends
+                    # them, not the next row's; set_fields is only looked up here and is called in the worker
+                    functools.partial(self.crm.set_fields, lead_id, email_key, owner_sent, status_sent),
                     self._call_deadline(),
                     lambda: CrmTimeout("no answer in time"),
                     tag=f"mirror:{lead_id}",

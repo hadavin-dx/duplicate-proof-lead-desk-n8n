@@ -140,7 +140,7 @@ Pages for a person (the pages only read; the buttons write: Retry and the “I c
   * The soft limit is raised to exactly the need, not to the hard limit, when the hard limit is unlimited or at least that. The refusal message names the open-file limit in force and what the desk needs.
 * (2) The lock file (exit 2, "another desk is using this database").
 * (3) The adapters (exit 1 if `/fake/info` cannot be read).
-* (4) `Desk` is built (exit 4, `EXIT_DESK_SETTING_REFUSED`, if the desk refuses a setting here: an AI adapter that declares a `timeout_seconds` that is not a number above 0 or not below the stuck grace minus its margin; the message is printed and nothing is served; this code differs from exit 1 on purpose).
+* (4) `Desk` is built (exit 4, `EXIT_DESK_SETTING_REFUSED`, if the desk refuses a setting here: an AI adapter that declares a `timeout_seconds` that is not a number above 0 or is above the AI call budget of 9 s; the message is printed and nothing is served; this code differs from exit 1 on purpose).
 * (5) The bind (retried for `BIND_RETRY_SECONDS`, then exit 5).
 * (6) The SIGTERM and SIGINT handler is installed, after the bind and before `desk.start_background()`, inside the `try` that holds the shutdown steps.
 * (7) `desk.start_background()` (starts the reaper).

@@ -235,7 +235,7 @@ def build_schedule(scenario: str, t0: float, prefix: str, seed: int) -> list[dic
             raise ValueError("dupmix needs at least one first request")
         for i in range(firsts):
             items.append(_item(DOORS[i % len(DOORS)], f"{prefix}-{i}", t0 + i / rate, scenario, "first"))
-        for j in range(repeats):
+        for _ in range(repeats):
             base = items[rng.randrange(firsts)] if firsts else items[0]
             if rng.random() < DUP_BOTH_DOORS_SHARE:
                 other = DOORS[1 - DOORS.index(base["door"])]

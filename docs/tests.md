@@ -24,7 +24,7 @@ The automatic checks in `.github/workflows/lint.yml` are: ruff (style), mypy (ty
 
 ## Browser tests
 
-The tests that drive the portal in a real browser need Playwright and a browser (`pip install playwright`, then `playwright install chromium`) and are skipped without them. They are in `tests/test_portal_browser.py`, `tests/test_portal_lead_pages.py`, three in `tests/test_portal_wording_and_masking.py`, a few in `tests/test_mode_safety.py`, and the layout and look tests (`tests/test_portal_layout.py`, `tests/test_portal_look.py`), which use the same browser helpers. **The checks in `.github/workflows/lint.yml` do not install Playwright, so they do not run the browser tests;** the masking promise P10 rests on them, so run them on your own computer. To see why any test was skipped, run `python -m pytest -q -rs`.
+The tests that drive the portal in a real browser need Playwright and a browser (`pip install playwright`, then `playwright install chromium`) and are skipped without them. They are in `tests/test_portal_browser.py`, `tests/test_portal_lead_pages.py`, `tests/test_stage_confirm_browser.py`, three in `tests/test_portal_wording_and_masking.py`, a few in `tests/test_mode_safety.py`, and the layout and look tests (`tests/test_portal_layout.py`, `tests/test_portal_look.py`), which use the same browser helpers. **The checks in `.github/workflows/lint.yml` do not install Playwright, so they do not run the browser tests;** the masking promise P10 rests on them, so run them on your own computer. To see why any test was skipped, run `python -m pytest -q -rs`.
 
 ## What each promise rests on
 

@@ -116,10 +116,10 @@
     // thin bars are hard to read: buckets under 15 seconds are joined into bars of about 15 seconds (an oldest partial group is dropped)
     var g = Math.max(1, Math.round(15 / step0));
     b0 = b0.slice(b0.length % g);
-    var b = [];
+    var b = [], jj, jEnd; // jj and jEnd: the inner loop below (no function inside the loop, and no new var statement)
     for (var j = 0; j < b0.length; j += g) {
       var grp = { t: b0[j].t, 'new': 0, duplicate: 0, review: 0 };
-      b0.slice(j, j + g).forEach(function (x) { grp['new'] += x['new']; grp.duplicate += x.duplicate; grp.review += x.review; });
+      for (jj = j, jEnd = Math.min(j + g, b0.length); jj < jEnd; jj++) { grp['new'] += b0[jj]['new']; grp.duplicate += b0[jj].duplicate; grp.review += b0[jj].review; }
       b.push(grp);
     }
     var step = step0 * g;

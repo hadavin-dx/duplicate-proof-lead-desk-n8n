@@ -86,7 +86,7 @@ class FakeSmtp:
     def _serve(self, raw: socket.socket) -> None:
         try:
             self._dialogue(raw)
-        except (OSError, ssl.SSLError, ValueError):
+        except (OSError, ValueError):
             pass
         finally:
             try:

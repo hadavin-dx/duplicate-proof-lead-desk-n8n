@@ -31,7 +31,6 @@ import http.client
 import json
 import os
 import re
-import socket
 import sys
 import threading
 import time
@@ -244,8 +243,7 @@ class SpendLedger:
             if len(raw) > LIVE_LEDGER_FILE_MAX_BYTES:
                 raise LiveCapReached(_TOO_BIG_FILE)
             return self._sum(raw, run, reserved, settled)
-        except LiveCapReached:
-            raise
+        # (a LiveCapReached raised above is none of these kinds, so it passes through unchanged)
         except (ValueError, KeyError, TypeError, ArithmeticError, RecursionError, OSError, MemoryError) as e:
             raise LiveCapReached(_UNREADABLE) from e  # a broken ledger must stop spending, not reset it
 
@@ -480,7 +478,7 @@ class LiveQualifier:
             except (OSError, http.client.HTTPException):
                 kind = None
             raise LiveTransport(f"the model service answered {e.code}" + (f" ({kind})" if kind else "")) from None
-        except (urllib.error.URLError, OSError, socket.timeout, ValueError, http.client.HTTPException):
+        except (OSError, ValueError, http.client.HTTPException):  # URLError and socket.timeout are OSError
             raise LiveTransport("the model service could not be reached in time") from None
         if len(raw) > LIVE_REPLY_MAX_BYTES:
             raise LiveBadReply("the reply is too long")

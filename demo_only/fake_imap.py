@@ -110,7 +110,7 @@ class FakeImap:
                     return
                 else:
                     f.write(f"{tag} BAD\r\n".encode())
-        except (OSError, ssl.SSLError, ValueError, IndexError, KeyError):
+        except (OSError, ValueError, IndexError, KeyError):
             return
         finally:
             raw.close()

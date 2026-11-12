@@ -323,9 +323,7 @@ class HubspotCrm:
             if isinstance(e.reason, (ConnectionRefusedError, socket.gaierror, ssl.SSLCertVerificationError)):
                 raise CrmNothingStored(type(e.reason).__name__) from None  # no request reached HubSpot
             raise CrmError(type(e.reason).__name__) from None
-        except CrmError:
-            raise
-        except (OSError, ValueError, http.client.HTTPException) as e:
+        except (OSError, ValueError, http.client.HTTPException) as e:  # a CrmError is none of these: it passes through
             raise CrmError(type(e).__name__) from None
 
     @staticmethod
