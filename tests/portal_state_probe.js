@@ -80,7 +80,8 @@ function fetchStub(p) {
   return Promise.resolve({ status, text: () => Promise.resolve(JSON.stringify(body)) });
 }
 const onNeeds = scenario === 'pause' || scenario === 'cards' || scenario === 'demo-poll';
-const win = { document: doc, location: { hash: onNeeds ? '#/needs' : '#/overview' }, addEventListener() {}, matchMedia: () => ({ matches: false, addEventListener() {} }),
+const hashFns = [];
+const win = { document: doc, location: { hash: onNeeds ? '#/needs' : '#/overview' }, addEventListener(t, f) { if (t === 'hashchange') hashFns.push(f); }, matchMedia: () => ({ matches: false, addEventListener() {} }),
   localStorage: { getItem() { return null; }, setItem() {}, removeItem() {} }, sessionStorage: { getItem() { return null; }, setItem() {}, removeItem() {} }, scrollTo() {}, navigator: {} };
 win.window = win;
 // the poll timers run fast so the whole story takes well under a second
@@ -88,6 +89,7 @@ const ctx = vm.createContext(Object.assign(win, { console, setTimeout: (f, ms) =
 const load = (rel) => vm.runInContext(fs.readFileSync(path.join(dir, rel), 'utf8'), ctx);
 load('portal.js');
 load(onNeeds ? 'pages/needs.js' : 'pages/overview.js');
+if (scenario === 'route-proto') load('pages/needs.js');
 if (scenario === 'fresh-fail') net = 'offline'; // the very first answer never arrives
 if (scenario === 'loading') net = 'hang'; // the first answer is still on its way
 els['demo-line'] = el('div'); els['demo-line'].hidden = true; // the page starts with the notice line empty and hidden
@@ -114,6 +116,16 @@ const allEnabled = () => { const b = actionButtons(); return b.length > 0 && b.e
     if (scenario === 'fresh-fail') {
       await until(() => textOf(els.main).includes('The desk is not answering') && textOf(els['demo-line']).includes('Could not check'), 'the not-answering page');
       console.log(JSON.stringify({ text: textOf(els.main), line: textOf(els['demo-line']), testids: testids() }));
+    } else if (scenario === 'route-proto') {
+      // route ids come from the address bar: names every object has must not reach the page table or Object.prototype
+      const out = [];
+      await until(() => textOf(els.main).length > 0, 'the first page');
+      for (const h of ['#/__proto__', '#/constructor', '#/toString', '#/prototype', '#/hasOwnProperty/x', '#/needs']) {
+        win.location.hash = h; hashFns.forEach((f) => f());
+        out.push({ hash: h, rendered: doc.documentElement.dataset.rendered });
+      }
+      const polluted = Object.keys(Object.prototype).concat(Object.keys(vm.runInContext('Object.prototype', ctx)));
+      console.log(JSON.stringify({ out, polluted, unmountOnProto: vm.runInContext('Object.prototype.unmount === undefined', ctx) }));
     } else if (scenario === 'loading') {
       console.log(JSON.stringify({ text: textOf(els.main), line: textOf(els['demo-line']), testids: testids() }));
     } else if (scenario === 'cards') {

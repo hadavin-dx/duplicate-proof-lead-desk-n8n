@@ -318,6 +318,22 @@ def test_actions_pause_while_the_desk_is_offline_or_answers_with_a_problem() -> 
 
 
 @needs_node
+def test_route_ids_from_the_address_bar_cannot_reach_object_prototype() -> None:
+    """Hash ids such as __proto__ fall back to the overview and leave Object.prototype untouched."""
+    seen = _state_probe("route-proto")
+    got = {r["hash"]: r["rendered"] for r in seen["out"]}  # type: ignore[index]
+    assert got == {
+        "#/__proto__": "overview",
+        "#/constructor": "overview",
+        "#/toString": "overview",
+        "#/prototype": "overview",
+        "#/hasOwnProperty/x": "overview",
+        "#/needs": "needs",
+    }
+    assert seen["polluted"] == [] and seen["unmountOnProto"] is True  # type: ignore[index]
+
+
+@needs_node
 def test_a_fresh_load_whose_first_answer_never_arrives_shows_the_desk_is_not_answering() -> None:
     """No earlier data and the first request fails: the whole page says the desk is not answering (no skeleton left)."""
     seen = _state_probe("fresh-fail")

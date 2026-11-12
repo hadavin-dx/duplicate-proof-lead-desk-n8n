@@ -465,7 +465,7 @@
   }
 
   // ---- pages, demo extension, router
-  var pages = {};
+  var pages = Object.create(null); // no inherited names: an id from the address bar can only hit a registered page
   var current = null;
   var demo = null;
   function page(id, def) { pages[id] = def; def.id = id; if (booted) renderNav(); }
@@ -545,8 +545,8 @@
   var stopPage = null;
   function route() {
     var id = (location.hash.replace(/^#\//, '') || 'overview').split('/')[0];
-    if (!has(pages, id)) id = 'overview';
-    if (!has(pages, id)) return;
+    if (id === '__proto__' || id === 'constructor' || id === 'prototype' || !Object.prototype.hasOwnProperty.call(pages, id)) id = 'overview';
+    if (!Object.prototype.hasOwnProperty.call(pages, id)) return;
     if (id === current && byId('page-body') && !routeForce) return;
     routeForce = false;
     clearReveals(true);
