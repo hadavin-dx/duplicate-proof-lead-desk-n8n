@@ -12,7 +12,12 @@ user:password in front of the host is never allowed) is kept, but only up to the
 host (file://localhost/..., postgres://localhost/..., ftp://localhost/...) is replaced whole.
 A tab, a carriage return or a line feed right after a localhost host (a browser ignores
 it, so `http://localhost<TAB>@host` reads as user localhost at host) makes the address a look-alike: that address, the
-break and the next run of non-blank characters are replaced whole.
+break and the next run of non-blank characters are replaced whole. Any other blank right after a localhost host (a
+space, a vertical tab, a form feed, a no-break space or another Unicode space; a browser keeps it as part of the user
+name) does the same, but only when the next run of non-blank characters holds an at-sign before any / ? or #
+(`http://localhost @host`, `http://localhost :80@host`); a plain `http://localhost:5678/x y` or `http://localhost y`
+(words after a space) is not touched. A zero-width space is not a blank: `http://localhost<ZWSP>@host` is read as one
+word and replaced as a look-alike by the ordinary rule.
 Never kept: webhook ids (the id field). The webhook PATH is kept as it is, so a secret written inside a path stays.
 What is NOT cleaned (the free text of a name or a parameter is not parsed), stated plainly:
  - an address without a scheme, such as //host/path or host:5432; a bare host name or IP address; a path that is not a
@@ -26,7 +31,8 @@ What is NOT cleaned (the free text of a name or a parameter is not parsed), stat
  - an expression inside a node name that refers to another node by an old name when two names became the same (the
    second gets " (2)").
 Over-cleaning, also by design: an address that an expression completes, such as "http://localhost:5678/x?" + $json.q,
-is read as a plain address and loses its "?" and what follows on the same run of characters.
+is read as a plain address and loses its "?" and what follows on the same run of characters. Likewise a bare local
+address, a space and then an e-mail address (`http://localhost jane@example.test`) loses the e-mail address too.
 Check the output by eye before it goes into a public repo.
 
 Usage: python -m tools.scrub_n8n_export in.json out.json
@@ -74,11 +80,17 @@ URL = re.compile(r"(?:[A-Za-z][A-Za-z0-9+.-]{0,31}:(?:\\?/){2}|(?:https?|ftps?|w
 _LOCAL_WEB = re.compile(
     r"((?:https?|wss?)://(?:localhost|127\.0\.0\.1)(?::[0-9]+)?)(?=[/?#]|\Z)([^?#]*)[?#]?.*\Z", re.DOTALL
 )
-# A tab, CR or LF right after a local host: browsers drop it, so what follows reads as part of the same address.
-# The whole thing (scheme, host, the break and the next run of non-blank characters) is replaced; linear: no
-# nested repetition, fixed prefix.
+# A blank right after a local host. Tab, CR and LF: browsers drop them, so what follows reads as part of the same
+# address. Any other blank (space, VT, FF, NBSP, other Unicode spaces; \s): a browser keeps it as part of the user
+# name, so it only matters when the next run of non-blank characters holds an at-sign before any / ? or # (then the
+# text after it is the real host); a plain "http://localhost:5678/x y" or "http://localhost y" stays out. The whole
+# thing (scheme, host, the blanks and the next non-blank run) is replaced. Linear: no nested repetition, a fixed
+# prefix, one blank run and one non-blank run per start; the look-ahead reads at most the next non-blank run.
+_AT = "@\uff20"
 _LOCAL_BROKEN = re.compile(
-    r"[A-Za-z][A-Za-z0-9+.-]{0,31}:(?:\\?/){2}(?:localhost|127\.0\.0\.1)(?::[0-9]*)?[\t\r\n]+[^\s\"'<>]*", re.IGNORECASE
+    r"[A-Za-z][A-Za-z0-9+.-]{0,31}:(?:\\?/){2}(?:localhost|127\.0\.0\.1)(?::[0-9]*)?"
+    r"(?:\s*[\t\r\n]\s*|\s+(?=[^\s" + _AT + r"/?#\"'<>]*[" + _AT + r"]))[^\s\"'<>]*",
+    re.IGNORECASE,
 )
 # links that carry content or code instead of a host
 ACTIVE_LINK = re.compile(

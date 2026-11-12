@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import socket
+import subprocess
 import sys
 import threading
 from http import HTTPStatus
@@ -38,20 +40,26 @@ def _load(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, url: str | None, key_
     return importlib.import_module("n8n_api")
 
 
-@pytest.mark.parametrize(
-    "url",
-    [
-        None,
-        _u("http", "127.0.0.1:5679/"),
-        _u("http", "localhost:5678"),
-        _u("http", "[::1]:5678"),
-        _u(
-            "http", "[::ffff:" + "127.0.0.1]:5678"
-        ),  # an IPv4-mapped loopback address is loopback (same answer as the desk)
-        _u("https", RESERVED),
-        _u("HTTPS", RESERVED.upper() + "/x/"),
-    ],
-)
+ACCEPTED = [
+    _u("http", "127.0.0.1:5679/"),
+    _u("http", "127.0.0.1"),  # no port
+    _u("http", "127.0.0.1:1"),
+    _u("http", "127.0.0.1:65535"),  # the highest port
+    _u("http", "localhost:5678"),
+    _u("http", "localhost"),
+    _u("http", "localhost/x/"),
+    _u("http", "[::1]:5678"),
+    _u("http", "[::1]"),
+    _u("http", "[::ffff:" + "127.0.0.1]:5678"),  # an IPv4-mapped loopback address is loopback (same answer as the desk)
+    _u("https", RESERVED),
+    _u("https", RESERVED + ":443"),
+    _u("https", RESERVED + ":65535/x"),
+    _u("HTTPS", RESERVED.upper() + "/x/"),
+    _u("https", "a-b.c1." + RESERVED + ":8443/api/"),
+]
+
+
+@pytest.mark.parametrize("url", [None, *ACCEPTED])
 def test_these_addresses_are_accepted(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, url: str | None) -> None:
     mod = _load(monkeypatch, tmp_path, url)
     assert not mod.BASE.endswith("/")
@@ -81,6 +89,31 @@ REFUSED = [
     _u("http", "127.0.0.1:5678/x\ny"),
     _u("http", "127.0.0.1:5678\n"),
     _u("http", " 127.0.0.1:5678"),
+    # a shape that urlsplit and urllib read differently (a check, not a failed name lookup, keeps the key at home)
+    _u("http", "127.0.0.1:80" + "\\" + RESERVED),  # the backslash: urlsplit stops at it, urllib dials the whole text
+    _u("http", "127.0.0.1:80:80"),  # two ports: urllib dials the name "127.0.0.1:80"
+    _u("http", RESERVED + "[::1]"),  # text in front of a bracketed literal
+    _u("http", "[::1]" + RESERVED),  # text behind it
+    _u("http", "[::1]:80:80"),
+    _u("http", "127.0.0.1:99999999999"),  # a port that does not exist (and may overflow in the name lookup)
+    _u("http", "127.0.0.1:65536"),  # one above the highest port
+    _u("http", "127.0.0.1:0"),  # port 0 cannot be connected to
+    _u("http", "127.0.0.1:00000"),
+    _u("http", "127.0.0.1:"),  # an empty port
+    _u("https", RESERVED + ":99999999999/x"),
+    _u("https", RESERVED + ":65536"),
+    _u("http", "127.0.0.1:\u0665"),  # a non-ASCII digit
+    _u("http", "127.0.0.1:+80"),
+    _u("http", "127.0.0.1:8_0"),
+    _u("http", "[::1]:99999"),
+    _u("https", "[x::1]" + RESERVED),
+    _u("https", "[" + RESERVED + "]"),  # not a literal address
+    _u("https", "[]"),
+    _u("https", "a_b." + RESERVED),  # an underscore is not a host name character
+    _u("https", "b\u00fccher." + RESERVED),  # a non-ASCII name: the ASCII form (punycode) must be given
+    _u("https", RESERVED + "%2f"),
+    _u("https", RESERVED + ";x"),
+    _u("https", RESERVED + "!"),
     _u("https", "user@" + RESERVED),
     _u("ftp", "127.0.0.1"),
     "file:" + "///x",
@@ -421,12 +454,7 @@ def test_what_is_accepted_is_exactly_what_urllib_would_dial() -> None:
     import urllib.request
     from urllib.parse import urlsplit
 
-    for url in (
-        _u("http", "127.0.0.1:5679/"),
-        _u("http", "localhost:5678"),
-        _u("http", "[::1]:5678"),
-        _u("https", RESERVED + "/x/"),
-    ):
+    for url in ACCEPTED:
         assert urllib.request.Request(url).host == urlsplit(url).netloc  # noqa: S310 - never opened
 
 
@@ -441,6 +469,8 @@ BAD_KEYS = {
     "only-blanks": "  \n\t \n",
     "delete-char": "made-up-key-\x7f-del",
     "latin-1-letter": "made-up-key-\u00e9-latin1",  # latin-1 can send it, but it is not printable ASCII: refused too
+    "one-megabyte-of-printable-letters": "made-up-key-" + "k" * 1_000_000,  # one word, but not a key
+    "just-over-the-length-limit": "made-up-key-" + "k" * 4096,
 }
 
 
@@ -456,10 +486,48 @@ def test_a_malformed_key_file_is_refused_with_a_fixed_message_that_does_not_show
     sys.modules.pop("n8n_api", None)
     with pytest.raises(SystemExit) as e:
         importlib.import_module("n8n_api")
-    shown = _message(e) + capsys.readouterr().out + capsys.readouterr().err
+    captured = capsys.readouterr()  # ONE call: a second call would return an empty result and drop this one's stderr
+    shown = _message(e) + captured.out + captured.err
     assert "key file" in shown
-    for piece in ("made-up-key", "LINE-", "SPACE", "TAB", "NUL", "latin1"):
+    assert "Traceback" not in shown
+    for piece in ("made-up-key", "LINE-", "SPACE", "TAB", "NUL", "latin1", "kkkk", "127.0.0.1", "5679"):
         assert piece not in shown, f"the key text {piece!r} is in the message"
+
+
+def _key_file_refusal(monkeypatch: pytest.MonkeyPatch, key_path: Path) -> str:
+    monkeypatch.setenv("N8N_API_KEY_FILE", str(key_path))
+    monkeypatch.delenv("N8N_URL", raising=False)
+    monkeypatch.syspath_prepend(str(REPO / "scripts"))
+    sys.modules.pop("n8n_api", None)
+    with pytest.raises(SystemExit) as e:
+        importlib.import_module("n8n_api")
+    return _message(e)
+
+
+def test_a_key_file_that_is_a_directory_is_a_clean_message_with_the_error_type_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / "keydir").mkdir()
+    msg = _key_file_refusal(monkeypatch, tmp_path / "keydir")
+    assert "key file" in msg and ("IsADirectoryError" in msg or "PermissionError" in msg)  # Windows: PermissionError
+    assert "keydir" not in msg
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "geteuid") or os.geteuid() == 0, reason="root (and Windows) can read a file with no permissions"
+)
+def test_a_key_file_without_read_permission_is_a_clean_message_with_the_error_type_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    secret = tmp_path / "locked-key.txt"
+    secret.write_text(KEY_TEXT, encoding="utf-8")
+    secret.chmod(0)
+    try:
+        msg = _key_file_refusal(monkeypatch, secret)
+    finally:
+        secret.chmod(0o600)
+    assert "key file" in msg and "PermissionError" in msg
+    assert KEY_TEXT not in msg and "locked-key" not in msg
 
 
 def _call_with_base(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, base: str) -> str:
@@ -567,3 +635,93 @@ def test_the_shared_opener_still_uses_the_proxy_of_the_environment_for_https_too
         proxy.shutdown()
         proxy.server_close()
     assert seen == [f"{RESERVED}:8443"] * 2, "open_http did not send the https request through the environment proxy"
+
+
+# --- nested too deeply, and names that the terminal cannot show: a clean end, not a traceback -------------------------
+def test_a_200_answer_nested_a_hundred_thousand_levels_deep_is_a_clean_message(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    deep = b"[" * 100_000 + b"]" * 100_000  # json.loads raises RecursionError (a RuntimeError, not a ValueError)
+    with pytest.raises(SystemExit) as e:
+        _run_against(_fixed(200, deep), monkeypatch, tmp_path, ["list"])
+    msg = _message(e)
+    assert "nested too deeply" in msg and KEY_TEXT not in msg and "[[[" not in msg
+
+
+def test_a_workflow_file_nested_a_hundred_thousand_levels_deep_is_a_clean_message(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    f = tmp_path / "deep.json"
+    f.write_bytes(b"[" * 100_000 + b"]" * 100_000)
+    mod = _load(monkeypatch, tmp_path, None)
+    with pytest.raises(SystemExit) as e:
+        mod.main(["n8n_api.py", "import", str(f)])
+    assert "cannot read a workflow" in _message(e) and "RecursionError" in _message(e)
+
+
+def test_a_body_that_cannot_be_encoded_is_a_clean_message(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """json.dumps raises RecursionError for a structure nested far deeper than json.loads would ever have read from a
+    file (here built in Python): call() ends with a message, not a traceback."""
+    deep: list[object] = []
+    for _ in range(100_000):
+        deep = [deep]
+    mod = _load(monkeypatch, tmp_path, None)
+    with pytest.raises(SystemExit) as e:
+        mod.call("POST", "/workflows", deep)
+    assert _message(e) == "cannot encode the workflow (RecursionError)"
+
+
+# names that a strict cp1252 pipe cannot encode: a lone surrogate (JSON may carry one as \ud800) and an emoji
+UNSHOWABLE = {"lone surrogate": "w-\\ud800-end", "emoji": "w-\\ud83d\\ude00-end"}
+
+
+def _run_script(tmp_path: Path, server_port: int, *argv: str) -> subprocess.CompletedProcess[str]:
+    key = tmp_path / "key.txt"
+    key.write_text(KEY_TEXT, encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if k.upper() not in {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"}}
+    env.update(
+        N8N_URL=_u("http", f"127.0.0.1:{server_port}"),
+        N8N_API_KEY_FILE=str(key),
+        PYTHONIOENCODING="cp1252:strict",  # strict, so an unencodable name raises, as on a cp1252 pipe
+    )
+    return subprocess.run(  # noqa: S603 - our own interpreter and script
+        [sys.executable, str(REPO / "scripts" / "n8n_api.py"), *argv],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize("which", list(UNSHOWABLE))
+def test_a_workflow_name_that_a_strict_cp1252_pipe_cannot_encode_is_listed_with_question_marks(
+    tmp_path: Path, which: str
+) -> None:
+    body = ('{"data": [{"id": "1", "active": true, "name": "' + UNSHOWABLE[which] + '"}]}').encode("ascii")
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), _fixed(200, body))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        done = _run_script(tmp_path, srv.server_address[1], "list")
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    assert done.returncode == 0, done.stderr
+    assert "Traceback" not in done.stderr and done.stdout.startswith("w-") and "-end active" in done.stdout
+    assert "?" in done.stdout and KEY_TEXT not in done.stdout + done.stderr
+
+
+def test_importing_a_workflow_with_such_a_name_also_ends_cleanly(tmp_path: Path) -> None:
+    (tmp_path / "w.json").write_text(
+        '{"name": "w-\\ud83d\\ude00-end", "nodes": [], "connections": {}}', encoding="ascii"
+    )
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), _fixed(200, b"{}"))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        done = _run_script(tmp_path, srv.server_address[1], "import", str(tmp_path / "w.json"))
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    assert done.returncode == 0, done.stderr
+    assert "Traceback" not in done.stderr and "w-?-end 200" in done.stdout.replace("??", "?")

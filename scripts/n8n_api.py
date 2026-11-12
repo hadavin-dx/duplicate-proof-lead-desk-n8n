@@ -11,10 +11,17 @@ at start, before the key file is opened. To reach an n8n on another computer use
 A redirect answer is never followed (the header with the key would go to the new address); it is reported as an error.
 For http to this computer the proxy settings of the environment (HTTP_PROXY, no_proxy) are ignored: the key header goes
 straight to this computer, never to a proxy. For https they are used as usual.
-The key file must hold one printable ASCII word (no space, no second line, no control character); anything else is
-refused at start with a fixed message that does not show the file text.
-Every failure ends with a short message and exit code 1 or 2, never a Python traceback, and never prints the key, the
-address, a header or an answer body: a network or protocol fault prints only the name of its error type.
+The key file must hold one printable ASCII word of at most 4096 characters (no space, no second line, no control
+character); anything else is refused at start with a fixed message that does not show the file text.
+Every failure that can come from the address, the key file, the workflow file, the network or n8n's answer ends with a
+short message and exit code 1 or 2, never a Python traceback, and never prints the key, the address, a header or an
+answer body: a network or protocol fault prints only the name of its error type. That list is: an address that cannot
+be read or is not allowed (also a port outside 1..65535), a key file that is missing, unreadable, a directory or not
+one printable ASCII word, a workflow file that is missing, not JSON, nested too deeply (RecursionError) or without a
+name, a workflow that cannot be encoded, every network, TLS and protocol fault, an answer that is not JSON or is nested
+too deeply, a list with an odd entry. A workflow name that the terminal cannot show is printed with "?" in place of
+the characters it cannot encode. NOT covered (a traceback is possible): Ctrl-C (KeyboardInterrupt), running out of
+memory (MemoryError), and a closed output pipe (BrokenPipeError).
 """
 
 from __future__ import annotations
@@ -22,6 +29,7 @@ from __future__ import annotations
 import http.client
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -44,6 +52,13 @@ REFUSED = (
 )
 
 
+# What urllib dials is the whole text between "//" and the next "/": a host (letters, digits, dots, hyphens) or a
+# bracketed IPv6 literal, then at most one ":port" of digits. Any other shape (a backslash, a second colon, text after
+# a bracket, an empty port) is read one way by urlsplit and another by urllib, so it is refused.
+NETLOC = re.compile(r"(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+)(:[0-9]{1,5})?")
+MAX_PORT = 65535
+
+
 def checked_base(url: str) -> str:
     """The n8n address, only when the API key may travel to it: https, or http to this computer. Uses the repository's
     own readers (split_url, is_loopback_host). Anything else is a SystemExit that says what to do."""
@@ -55,6 +70,9 @@ def checked_base(url: str) -> str:
     # "//" and the next "/". So a user name part or a blank/control character is refused here, by a check.
     if "@" in parts.netloc or any(c.isspace() or not c.isprintable() for c in url):
         raise SystemExit(REFUSED)
+    shape = NETLOC.fullmatch(parts.netloc)
+    if shape is None or (shape.group(2) is not None and not 1 <= int(shape.group(2)[1:]) <= MAX_PORT):
+        raise SystemExit(REFUSED)
     scheme, host = parts.scheme.lower(), parts.hostname or ""
     if host and (scheme == "https" or (scheme == "http" and is_loopback_host(host))):
         return url.rstrip("/")
@@ -65,19 +83,25 @@ BASE = checked_base(os.environ.get("N8N_URL", "http://127.0.0.1:5679"))
 PROXY_ALLOWED = urlsplit(BASE).scheme.lower() == "https"  # http is only ever to this computer: no proxy for the key
 
 
+MAX_KEY = 4096  # an n8n API key is a token of a few hundred characters; anything longer is not one
+
+
 def _read_key() -> str:
     name = os.environ.get("N8N_API_KEY_FILE")
     if not name:
         raise SystemExit("N8N_API_KEY_FILE must be the path of a one-line file with the n8n API key")
     try:
-        key = Path(name).read_text(encoding="utf-8").strip()
-    except (OSError, ValueError) as e:  # a missing or unreadable file, or bytes that are not text
+        with Path(name).open("rb") as f:  # a directory, a missing or an unreadable file: OSError
+            raw = f.read(MAX_KEY + 1)  # never the whole of a huge file: a key is short
+        key = raw.decode("utf-8").strip()  # bytes that are not text: UnicodeDecodeError (a ValueError)
+    except (OSError, ValueError) as e:
         raise SystemExit(f"cannot read the n8n API key file ({type(e).__name__})") from None
     # Printable ASCII without a blank: a second line, a tab or NUL inside, or a non-latin-1 letter would make the header
     # call fail with a message that holds the key. The text of the file is never part of the message.
-    if not key or not all(c.isascii() and c.isprintable() and not c.isspace() for c in key):
+    if not key or len(key) > MAX_KEY or not all(c.isascii() and c.isprintable() and not c.isspace() for c in key):
         raise SystemExit(
-            "the n8n API key file must hold one word of printable ASCII (no space, second line or control character)"
+            "the n8n API key file must hold one word of printable ASCII (no space, second line or control character) "
+            f"of at most {MAX_KEY} characters"
         )
     return key
 
@@ -86,8 +110,19 @@ KEY = _read_key()
 KEEP = ("name", "nodes", "connections", "settings")  # the create call refuses other top-level keys
 
 
+def say(*parts: object) -> None:
+    """print() for names that come from n8n or from a file: a character the terminal cannot encode (a lone surrogate,
+    an emoji on a cp1252 pipe) becomes "?" instead of ending the run with a UnicodeEncodeError."""
+    encoding = sys.stdout.encoding or "utf-8"
+    text = " ".join(str(p) for p in parts)
+    sys.stdout.write(text.encode(encoding, errors="replace").decode(encoding, errors="replace") + "\n")
+
+
 def call(method: str, path: str, body: object = None) -> tuple[int, object]:
-    data = None if body is None else json.dumps(body).encode()
+    try:
+        data = None if body is None else json.dumps(body).encode()
+    except (ValueError, TypeError, RuntimeError) as e:  # nested too deeply (RecursionError), a lone surrogate, ...
+        raise SystemExit(f"cannot encode the workflow ({type(e).__name__})") from None
     try:
         req = urllib.request.Request(  # noqa: S310 - local n8n, http by design
             BASE + "/api/v1" + path,
@@ -103,6 +138,8 @@ def call(method: str, path: str, body: object = None) -> tuple[int, object]:
                 return r.status, (json.loads(raw) if raw else {})
             except ValueError:  # JSONDecodeError and UnicodeDecodeError: n8n (or something in front of it) sent no JSON
                 raise SystemExit("n8n answered 200 with a body that is not JSON (not shown)") from None
+            except RuntimeError:  # RecursionError: JSON nested thousands of levels deep (not a ValueError)
+                raise SystemExit("n8n answered 200 with a body nested too deeply to read (not shown)") from None
     except urllib.error.HTTPError as e:
         try:
             e.read()  # the body is not kept: an error page could echo a header
@@ -149,20 +186,21 @@ def main(a: list[str]) -> int:
         return 2
     if cmd == "list":
         for w in workflows():
-            print(w["name"], "active" if w["active"] else "inactive")
+            say(w["name"], "active" if w["active"] else "inactive")
     elif cmd == "import":
         try:
             wf = json.loads(Path(a[2]).read_text(encoding="utf-8"))
             wf.setdefault("settings", {})
             str(wf["name"])  # a workflow file without a name is refused here, not after the call
-        except (OSError, ValueError, KeyError, AttributeError) as e:  # no file, not JSON, not an object, no name
+        except (OSError, ValueError, KeyError, AttributeError, RuntimeError) as e:  # no file, not JSON (or nested too
+            # deeply: RecursionError), not an object, no name
             raise SystemExit(f"cannot read a workflow from {a[2]} ({type(e).__name__})") from None
         code, res = call("POST", "/workflows", {k: wf[k] for k in KEEP if k in wf})
-        print(wf["name"], code, "" if code == HTTPStatus.OK else res)
+        say(wf["name"], code, "" if code == HTTPStatus.OK else res)
         return 0 if code == HTTPStatus.OK else 1
     else:  # activate or deactivate
         code, res = call("POST", f"/workflows/{find(a[2])}/{cmd}")
-        print(a[2], cmd, code, "" if code == HTTPStatus.OK else res)
+        say(a[2], cmd, code, "" if code == HTTPStatus.OK else res)
         return 0 if code == HTTPStatus.OK else 1
     return 0
 

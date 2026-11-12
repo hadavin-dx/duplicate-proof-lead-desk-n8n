@@ -94,6 +94,26 @@ GONE = [
     (_u("http", "localhost:80\t@" + RESERVED), ["80", "@", RESERVED]),
     (_u("HTTPS", "LOCALHOST\t@" + RESERVED.upper()), [RESERVED.upper(), "@"]),
     ("a " + _u("ws", "localhost\t\t@" + RESERVED) + " b", [RESERVED, "@"]),
+    # any other blank right after a local host, then an at-sign: a browser keeps the blank in the user name and reads
+    # the text after the at-sign as the host (space, VT, FF, NBSP, other Unicode spaces, a run of mixed blanks)
+    (_u("http", "localhost @" + RESERVED), ["@", RESERVED]),
+    (_u("http", "localhost\u00a0@" + RESERVED), ["@", RESERVED, "\u00a0"]),
+    (_u("http", "127.0.0.1 @" + RESERVED), ["@", RESERVED]),
+    (_u("http", "localhost\x0b@" + RESERVED), ["@", RESERVED, "\x0b"]),
+    (_u("http", "localhost\x0c@" + RESERVED), ["@", RESERVED, "\x0c"]),
+    (_u("http", "localhost\u2003@" + RESERVED), ["@", RESERVED, "\u2003"]),
+    (_u("http", "localhost\u3000@" + RESERVED), ["@", RESERVED, "\u3000"]),
+    (_u("http", "localhost\u2028@" + RESERVED), ["@", RESERVED]),
+    (_u("http", "localhost \u00a0\x0b\x0c  @" + RESERVED + "/x"), ["@", RESERVED]),
+    (_u("http", "localhost:5678 @" + RESERVED), ["@", RESERVED, "5678"]),
+    (_u("http", "localhost :80@" + RESERVED), ["80@", RESERVED]),  # a port-like word in the user name
+    (_u("http", "localhost \u200b@" + RESERVED), ["@", RESERVED, "\u200b"]),  # a zero-width space in the user name
+    (_u("http", "localhost\u200b@" + RESERVED), ["@", RESERVED, "\u200b"]),  # a zero-width space is not a blank
+    (_u("http", "localhost @\uff20" + RESERVED), [RESERVED]),  # the full-width at-sign
+    (_u("http", "localhost \uff20" + RESERVED), [RESERVED]),
+    (_u("wss", "LOCALHOST\u00a0@" + RESERVED.upper()), [RESERVED.upper(), "@"]),
+    (_u("http", "localhost\t @" + RESERVED), ["@", RESERVED]),  # a tab and then a space
+    ("go " + _u("http", "localhost @" + RESERVED) + " now", [RESERVED, "@"]),
     # links that carry code or content
     ("open javascript:alert(document.cookie) now", ["alert", "cookie"]),
     ("data:text/plain;base64,QUJDREVGRw== end", ["QUJDREVGRw"]),
@@ -150,9 +170,51 @@ def test_limit_an_address_without_a_scheme_is_not_cleaned(text: str) -> None:
     assert _clean(text) == text
 
 
+# A blank after a complete local address followed by words: not an at-sign look-alike, so nothing is eaten.
+KEEP_AFTER_BLANK = [
+    "see " + _u("http", "localhost:5678/x y"),
+    "see " + _u("http", "localhost:5678/x\u00a0y"),
+    _u("http", "localhost y"),  # a bare local address, a space, a plain word
+    _u("http", "localhost\u00a0words and more"),
+    _u("http", "127.0.0.1\x0bwords"),
+    _u("http", "localhost\u3000words"),
+    _u("http", "localhost:5678 and /x@" + RESERVED),
+    _u("http", "localhost x/y@" + RESERVED),  # a / ends the user name part
+]
+
+
+@pytest.mark.parametrize("text", KEEP_AFTER_BLANK)
+def test_a_blank_after_a_local_address_without_an_at_sign_next_is_not_eaten(text: str) -> None:
+    assert _clean(text) == text
+
+
+def test_the_path_of_a_local_address_ends_the_address_before_a_blank_and_an_at_sign() -> None:
+    assert _clean(_u("http", "localhost:5678/p?q=1 @" + RESERVED)) == "http://localhost:5678/p @" + RESERVED
+
+
+def test_every_character_that_python_reads_as_a_blank_is_covered_right_after_a_local_host() -> None:
+    """Every code point of Unicode that str.isspace() (and so the pattern's \\s) reads as a blank, in front of an
+    at-sign: the host behind it is gone. Checked over the whole code space, not a hand-picked list."""
+    blanks = [chr(c) for c in range(0x110000) if chr(c).isspace()]
+    assert len(blanks) >= 25  # tab, LF, VT, FF, CR, FS..US, space, NEL, NBSP, U+2000.. and so on
+    leaks = [
+        hex(ord(c))
+        for c in blanks
+        for host in ("localhost", "127.0.0.1")
+        if RESERVED in _clean(_u("http", host + c + "@" + RESERVED))
+    ]
+    assert not leaks, leaks
+
+
 def test_a_line_break_right_after_a_localhost_host_costs_only_the_next_word() -> None:
     """The smaller safe change: the break and the next run of non-blank characters go, the text after that stays."""
     assert _clean(_u("http", "localhost") + "\nnext line") == "http://localhost/REPLACE-ME line"
+
+
+def test_limit_a_bare_local_address_then_a_space_then_an_allowed_e_mail_address_is_replaced_too() -> None:
+    """Stated over-cleaning (docstring and docs/settings.md): the e-mail address next to a bare local address, after a
+    blank, is read as the user name part of that address."""
+    assert _clean(_u("http", "localhost jane@" + RESERVED)) == "http://localhost/REPLACE-ME"
 
 
 def test_limit_a_secret_inside_the_path_of_a_kept_address_stays() -> None:
@@ -168,38 +230,81 @@ def test_limit_an_address_that_an_expression_completes_loses_its_question_mark()
     assert _clean('"http://localhost:5678/x?" + $json.q') == '"http://localhost:5678/x" + $json.q'
 
 
-# Short phrases that the module text and docs/settings.md must BOTH carry: the two lists of what is not cleaned
-# (and of the over-cleaning) are one list.
+# Short phrases for the limits and the over-cleaning. The test below requires (1) every phrase in BOTH the module text
+# and docs/settings.md, (2) every item of the module's "NOT cleaned" bullets, and every item of the docs' "Not
+# cleaned" list, to carry at least one of these phrases (so a limit written on one side only, with no phrase here, is
+# caught), and (3) the two over-cleaning sentences to carry theirs.
 LIMIT_PHRASES = (
     "an address without a scheme",
     "a bare host name",
-    "a path that is not a URL",
+    "a path that is not a url",
     "percent signs",
     "a secret inside the path",
-    "%3F",
+    "%3f",
     "a data: link without a media type",
-    "U+FE6B",
+    "u+fe6b",
     "ideographic full stop",
     "the keys of a dictionary",
     "refers to another node by an old name",
-    "an address that an expression completes",
+)
+OVER_CLEANING_PHRASES = ("an address that an expression completes", "a bare local address, a space and then an e-mail")
+BLANK_PHRASES = (
     "a tab, a carriage return or a line feed",
+    "a form feed, a no-break space or another unicode space",
+    "an at-sign before any",
 )
 
 
-def test_the_docs_list_of_limits_equals_the_module_list() -> None:
+def _flat(text: str) -> str:
     import re
 
+    return re.sub(r"\s+", " ", text.replace("`", "")).lower()
+
+
+def _items(section: str) -> list[str]:
+    """The list items of a limits section: split at the bullets of the module text and at each ';' that is not inside
+    a pair of brackets."""
+    items, depth, current = [], 0, ""
+    for part in section.replace(" - ", " ; ").split(" "):
+        depth += part.count("(") - part.count(")")
+        if part == ";" and depth == 0:
+            items.append(current.strip())
+            current = ""
+            continue
+        current += " " + part
+        if part.endswith(";") and depth == 0:
+            items.append(current.strip())
+            current = ""
+    items.append(current.strip())
+    return [i for i in items if i]
+
+
+def _limit_sections() -> tuple[str, str, str, str]:
     import tools.scrub_n8n_export as module
 
-    doc = re.sub(r"\s+", " ", module.__doc__ or "").lower()
-    settings = re.sub(r"\s+", " ", (REPO / "docs" / "settings.md").read_text(encoding="utf-8")).lower()
+    doc = _flat(module.__doc__ or "")
+    settings = _flat((REPO / "docs" / "settings.md").read_text(encoding="utf-8"))
+    mod_list = doc[doc.index("what is not cleaned") : doc.index("over-cleaning, also by design")]
+    docs_start = settings.index("**not cleaned**")
+    docs_list = settings[docs_start : settings.index("over-cleaning by design", docs_start)]
+    return doc, settings, mod_list, docs_list
+
+
+def test_the_docs_and_the_module_text_carry_the_same_limit_phrases_and_every_listed_limit_has_one() -> None:
+    doc, settings, mod_list, docs_list = _limit_sections()
     missing = [
-        (p, "module" if p.lower() not in doc else "docs")
-        for p in LIMIT_PHRASES
-        if p.lower() not in doc or p.lower() not in settings
+        (p, "module" if p not in doc else "docs")
+        for p in (*LIMIT_PHRASES, *OVER_CLEANING_PHRASES, *BLANK_PHRASES)
+        if p not in doc or p not in settings
     ]
     assert not missing, f"stated in only one of the module text and docs/settings.md: {missing}"
+    for where, section in (("module text", mod_list), ("docs/settings.md", docs_list)):
+        items = _items(section)[1 if where == "module text" else 0 :]  # the module's first piece is only a heading
+        assert len(items) >= 5, (where, items)
+        unlisted = [i for i in items if not any(p in i for p in LIMIT_PHRASES)]
+        assert not unlisted, (
+            f"{where} lists a limit that the shared phrase list does not know (add it to both): {unlisted}"
+        )
 
 
 def test_limit_an_ideographic_full_stop_ends_the_domain_of_an_address() -> None:
@@ -316,6 +421,19 @@ def _worst_shapes(n: int) -> dict[str, str]:
         "many localhost addresses with a tab": ("http" + "://localhost\t@a ") * (n // 18),
         "many localhost addresses with a line break": ("http" + "://127.0.0.1:1\n") * (n // 16),
         "long scheme-like word run before localhost": "a" * (n - 20) + "://localhost\t",
+        # blanks other than tab/CR/LF after the local host (space, VT, FF, NBSP, other Unicode spaces)
+        "localhost, then only spaces": "http" + "://localhost" + " " * (n - 16),
+        "localhost, then only no-break spaces": "http" + "://localhost" + "\u00a0" * (n - 16),
+        "localhost, a long mixed blank run": "http" + "://localhost" + " \x0b\x0c\u00a0\u3000" * ((n - 16) // 5),
+        "localhost, a long blank run, then a tab at the very end": "http" + "://localhost" + " " * (n - 17) + "\t",
+        "localhost, spaces, then a long run without an at-sign": "http" + "://localhost  " + "a" * (n - 18),
+        "localhost, spaces, then a long run, a slash, an at-sign": "http" + "://localhost  " + "a" * (n - 20) + "/@",
+        "localhost, a space, then a long run ending in an at-sign": "http" + "://localhost " + "a" * (n - 17) + "@a",
+        "many localhost addresses, a space, an at-sign": ("http" + "://localhost @a ") * (n // 17),
+        "many localhost addresses, a no-break space, a word": ("http" + "://localhost\u00a0word ") * (n // 22),
+        "many localhost addresses, two spaces, a long word": ("http" + "://127.0.0.1  " + "w" * 40 + " ") * (n // 58),
+        "many localhost addresses with a full-width at-sign": ("http" + "://localhost \uff20a ") * (n // 18),
+        "long scheme-like run, localhost, spaces": "a" * (n - 30) + "://localhost" + " " * 14,
     }
 
 
