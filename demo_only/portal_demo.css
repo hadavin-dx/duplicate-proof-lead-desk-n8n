@@ -1,0 +1,107 @@
+/* Demo extension styles. Tokens, spacing and radius come from the portal stylesheet. */
+.strip-demo .tag { text-transform: uppercase; }
+
+/* connections strip */
+.dm-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: var(--surface); border: 1px solid var(--edge); border-radius: var(--r-card); box-shadow: var(--shadow); }
+.dm-cell { padding: var(--s4) var(--s5); display: grid; gap: var(--s1); align-content: start; min-width: 0; }
+.dm-cell + .dm-cell { border-left: 1px solid var(--border-soft); }
+.dm-cell-main { display: flex; align-items: center; gap: var(--s2); font-size: var(--t-md); font-weight: 600; }
+.dm-cell-main b { font-size: var(--t-lg); }
+.dm-cell-sub { font-size: var(--t-xs); color: var(--ink-3); }
+.dm-dot { width: 8px; height: 8px; border-radius: var(--r-pill); background: var(--neutral-solid); flex: none; }
+.dm-dot-off { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ink-3); }
+.dm-dot-ok { background: var(--ok-solid); } .dm-dot-bad { background: var(--bad-solid); } .dm-dot-warn { background: var(--warn-solid); } .dm-dot-info { background: var(--info-solid); }
+
+/* cross-check */
+.dm-proof { display: grid; gap: var(--s3); padding: var(--s4); border-radius: 12px; background: linear-gradient(135deg, var(--surface-2), var(--violet-wash)); border: 1px solid var(--border-soft); }
+.dm-proof-row { display: flex; align-items: flex-start; gap: var(--s4); flex-wrap: nowrap; }
+.dm-figure { display: grid; gap: var(--s1); }
+.dm-figure-value { font-size: var(--t-xl); font-weight: 650; letter-spacing: -0.02em; line-height: 1.1; }
+.dm-figure-label { font-size: var(--t-sm); color: var(--ink-2); }
+.dm-vs { display: flex; align-items: center; justify-content: center; min-height: calc(var(--t-xl) * 1.1); font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); text-align: center; flex: none; max-width: 64px; line-height: 1.2; }
+
+/* lead drawer addition */
+.dm-lead { display: grid; gap: var(--s3); }
+.dm-lead .kv { grid-template-columns: max-content 1fr; }
+
+
+/* Demo controls page */
+.dm-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s4); }
+.dm-form .select, .dm-page .select { width: 100%; }
+.dm-actions { display: grid; }
+.dm-action { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: var(--s4); align-items: center; padding: var(--s3) 0; border-top: 1px solid var(--border-soft); }
+.dm-action .btn { width: 100%; }
+.dm-action p { font-size: var(--t-sm); }
+.dm-result { padding: var(--s4); border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border-soft); font-size: var(--t-sm); }
+.dm-result-title { font-weight: 600; font-size: var(--t-base); }
+.dm-answers { list-style: none; margin: var(--s2) 0 0; padding: 0; display: grid; gap: var(--s1); color: var(--ink-2); }
+.dm-armed { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); font-size: var(--t-sm); }
+.dm-dev .dm-cmdrow { margin-top: var(--s3); }
+.dm-cmdrow { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+.dm-cmd { flex: 1; min-width: 0; padding: var(--s3) var(--s4); border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border-soft); overflow-wrap: anywhere; }
+
+@media (max-width: 1100px) { .dm-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .dm-cell:nth-child(3) { border-left: 0; } .dm-action { grid-template-columns: 1fr; } }
+.dm-lead .eyebrow { color: var(--ink-3); }
+.dm-page { align-items: stretch; }
+.dm-page > div { display: flex; }
+.dm-page > div > .card { flex: 1; }
+
+/* two equal columns of cards; below 1500 px they stack in the order Send, Stop, Retry test, Reset */
+.dm-col { display: grid; gap: var(--s4); align-content: start; }
+.dm-page > div.dm-col { display: grid; }
+.dm-page > div.dm-col > .card { flex: none; }
+.dm-ai { display: grid; gap: var(--s2); }
+@media (max-width: 1100px) { .dm-col { display: contents; } .dm-col > [data-testid=demo-send-card] { order: 1; } .dm-col > [data-testid=demo-crash-card] { order: 2; } .dm-col > [data-testid=demo-retry-card] { order: 3; } .dm-col > [data-testid=demo-reset-card] { order: 4; } }
+
+/* the strip cells are even: dot inline with the first line, two-line notes reserve their height, smaller text below 1500 px */
+.dm-cell-main { display: block; }
+.dm-cell-main .dm-dot { display: inline-block; margin-right: var(--s2); vertical-align: middle; }
+.dm-cell-sub { min-height: calc(2 * 1.4em); line-height: 1.4; }
+@media (max-width: 1500px) { .dm-cell { padding: var(--s4); } .dm-cell-main { font-size: var(--t-base); } .dm-cell-main b { font-size: var(--t-md); } }
+.dm-figure-row { display: flex; align-items: baseline; gap: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--border-soft); }
+
+/* the demo mail step and CRM block in every lead drawer: one grey for the labels, normal text colour for the numbers */
+.dm-lead .kv dt { color: var(--ink-3); }
+.dm-lead .kv dd { color: var(--ink); }
+
+/* the two columns of the demo page end on one line: the last card of each column takes any extra height and spreads its blocks */
+.dm-page > div.dm-col { grid-template-rows: auto 1fr; align-content: stretch; }
+.dm-page > div.dm-col > .card:last-child { align-content: start; }
+/* in two narrower columns the button sits above its sentence */
+@media (max-width: 1500px) { .dm-action { grid-template-columns: 1fr; gap: var(--s2); } .dm-action .btn { width: auto; justify-self: start; min-width: 220px; } }
+
+/* the cross-check is a full-width strip: title, the two numbers and the verdict in one row that wraps whole parts (never
+   word by word); the reminder sentence takes its own line */
+.ov-proof > .dm-proof { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--s6); row-gap: var(--s3); }
+.ov-proof > .dm-proof > .eyebrow { flex: none; }
+.ov-proof .dm-proof-row { flex: none; gap: var(--s5); }
+.ov-proof .dm-figure { min-width: 11rem; }
+.ov-proof .dm-proof > .note, .ov-proof .dm-proof > .pill, .ov-proof .dm-proof > .faint { flex: none; }
+.ov-proof .dm-proof > .note { flex: 1 1 22rem; }
+.ov-proof .dm-proof > p.muted { flex: 1 0 100%; margin: 0; }
+.ov-proof .note-warn { border: 1px solid var(--warn-solid); }
+.dm-page { align-items: start; }
+.dm-page > div.dm-col { grid-template-rows: auto; }
+
+/* the four cards flow in two balanced columns, so the columns end together at every width */
+.dm-flow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s4); align-items: stretch; }
+.dm-flow > [data-testid=demo-send-card], .dm-flow > [data-testid=demo-reset-card] { grid-column: 1 / -1; }
+.dm-flow .dm-action { grid-template-columns: 220px minmax(0, 1fr); gap: var(--s4); }
+.dm-flow .dm-action .btn { width: 100%; }
+@media (max-width: 1100px) { .dm-flow { grid-template-columns: minmax(0, 1fr); } .dm-flow .dm-action { grid-template-columns: 1fr; } }
+.dm-flow .btn:disabled { opacity: .85; }
+
+/* the proof pill fits its text; the two small cards of the flow spread their parts over the height */
+.dm-proof > .pill { justify-self: start; }
+.dm-flow > [data-testid=demo-crash-card], .dm-flow > [data-testid=demo-retry-card] { align-content: space-between; }
+
+/* the lead panel block: the heading and its first line sit one gap apart (the shared footnote padding would double it) */
+.dm-lead .dt-foot { padding-top: 0; margin: 0; }
+
+/* on the Overview the proof strip is one tidy line: label, the two numbers with their word between them, and the verdict at the right edge */
+.ov-proof > .dm-proof { align-items: flex-start; }
+.ov-proof .dm-proof-row { flex: 1 1 auto; align-items: flex-start; justify-content: flex-start; }
+/* the label, the word between the numbers and the verdict all sit on the line of the big digits, not between the digits and their captions */
+.ov-proof .dm-vs { align-self: flex-start; max-width: none; min-width: 5.5rem; padding: 0 var(--s2); }
+.ov-proof > .dm-proof > .eyebrow { min-height: calc(var(--t-xl) * 1.1); display: flex; align-items: center; }
+.ov-proof .dm-proof > .pill, .ov-proof .dm-proof > span.faint { margin-left: auto; align-self: flex-start; margin-top: calc((var(--t-xl) * 1.1 - 1.5rem) / 2); }

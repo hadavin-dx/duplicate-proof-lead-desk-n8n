@@ -1,0 +1,95 @@
+{
+  "now": 1000040000,
+  "lead": {
+    "lead_id": "L3f9a1c2b4d5e",
+    "receipt_id": 5,
+    "source": "form",
+    "name": "Ada Example",
+    "email": "Ada@Example.test",
+    "phone": "555 0100",
+    "company": "Example Ltd",
+    "message": "Please call me.",
+    "created_at": 1000039720
+  },
+  "followup": {
+    "state": "sent",
+    "ai_label": "hot",
+    "attempts": 1,
+    "auto_attempts": 0,
+    "last_error": null,
+    "updated_at": 1000039721,
+    "sent_at": 1000039721,
+    "crm_done": 1,
+    "ambiguous_prior": 0
+  },
+  "state_view": "sent",
+  "next_step": null,
+  "first_receipt": {
+    "receipt_id": 5,
+    "source": "form",
+    "source_ref": "ui-1000039720000-1",
+    "received_at": 1000039720,
+    "decided_at": 1000039720,
+    "arrivals": 3,
+    "payload_conflict": 0
+  },
+  "duplicates": [
+    {
+      "receipt_id": 7,
+      "source": "webhook",
+      "source_ref": "ui-1000039760000-1",
+      "received_at": 1000039710,
+      "decided_at": 1000039760,
+      "seconds_after_first": -10,
+      "differing": [
+        {
+          "field": "phone",
+          "first": "555 0100",
+          "this": "555 0199"
+        },
+        {
+          "field": "message",
+          "first": "Please call me.",
+          "this": "Hello\nline two"
+        }
+      ],
+      "decision": {
+        "decision": "approved",
+        "decided_by": "appr-01",
+        "decided_by_name": "Approver One",
+        "channel": "portal",
+        "decided_at": 1000039800
+      }
+    },
+    {
+      "receipt_id": 6,
+      "source": "webhook",
+      "source_ref": "ui-1000039750000-1",
+      "received_at": 1000039750,
+      "decided_at": 1000039750,
+      "seconds_after_first": 30,
+      "differing": [],
+      "decision": null
+    }
+  ],
+  "duplicates_total": 2,
+  "review_items": [
+    "D6"
+  ],
+  "owner": "Asha",
+  "step": "new",
+  "step_label": "New",
+  "stage_writes_real_crm": false,
+  "steps": [],
+  "reminder": null,
+  "crm_copy": "waiting",
+  "approval": {
+    "label": "demo approver",
+    "approvers": [
+      {
+        "id": "appr-01",
+        "name": "Approver One"
+      }
+    ]
+  }
+}

@@ -1,0 +1,292 @@
+{
+  "now": 1000040000,
+  "items": [
+    {
+      "item_id": "FL7b2e9d0c1a34",
+      "item_type": "followup",
+      "kind": "failed",
+      "reason": "refused",
+      "lead_id": "L7b2e9d0c1a34",
+      "since": 1000039600,
+      "source": "form",
+      "lead_name": "Grace Sample",
+      "tab": "action",
+      "title": "The follow-up email was not sent",
+      "state_view": "failed",
+      "reason_text": "The mail step (the part that sends the email) refused the email. If you are not sure, check the mail step before you retry.",
+      "actions": [
+        {
+          "id": "retry",
+          "label": "Retry",
+          "endpoint": "/review/FL7b2e9d0c1a34/retry",
+          "body": null,
+          "confirm": null
+        }
+      ]
+    },
+    {
+      "item_id": "FLc3a1f08e7d52",
+      "item_type": "followup",
+      "kind": "failed",
+      "reason": "timeout",
+      "lead_id": "Lc3a1f08e7d52",
+      "since": 1000039650,
+      "source": "form",
+      "lead_name": "Ada Example",
+      "tab": "action",
+      "title": "Follow-up did not finish",
+      "state_view": "did_not_finish",
+      "reason_text": "The follow-up did not finish and the desk has no confirmation. The email may have left. Check the mail step (the part that sends the email) first. If the email was already sent, Retry sends a second one; Retry is safe only when the mail step remembers which emails it has already sent.",
+      "actions": [
+        {
+          "id": "retry",
+          "label": "Retry",
+          "endpoint": "/review/FLc3a1f08e7d52/retry",
+          "body": null,
+          "confirm": null
+        }
+      ]
+    },
+    {
+      "item_id": "FLd41b9e6a0c37",
+      "item_type": "followup",
+      "kind": "failed",
+      "reason": "person: not sent",
+      "lead_id": "Ld41b9e6a0c37",
+      "since": 1000039700,
+      "source": "form",
+      "lead_name": "Linus Demo",
+      "tab": "action",
+      "title": "Follow-up failed; a person marked the email as not sent",
+      "state_view": "failed",
+      "reason_text": "A person checked and marked that the email was not sent. Retry sends it now. If you are not sure it was not sent, check the mail step first.",
+      "actions": [
+        {
+          "id": "retry",
+          "label": "Retry",
+          "endpoint": "/review/FLd41b9e6a0c37/retry",
+          "body": null,
+          "confirm": null
+        }
+      ]
+    },
+    {
+      "item_id": "FL0c4d8e2f6a19",
+      "item_type": "followup",
+      "kind": "unknown",
+      "reason": "ambiguous_prior",
+      "lead_id": "L0c4d8e2f6a19",
+      "since": 1000039610,
+      "source": "form",
+      "lead_name": "Linus Demo",
+      "tab": "action",
+      "title": "The email may or may not have been sent",
+      "state_view": "unknown",
+      "reason_text": "An earlier attempt may already have sent the email before a stop. The desk will not send again until a person checks.",
+      "actions": [
+        {
+          "id": "retry",
+          "label": "Retry",
+          "endpoint": "/review/FL0c4d8e2f6a19/retry",
+          "body": null,
+          "confirm": null
+        },
+        {
+          "id": "resolve_sent",
+          "label": "I checked: it was sent",
+          "endpoint": "/review/FL0c4d8e2f6a19/resolve",
+          "body": {
+            "decision": "sent"
+          },
+          "confirm": {
+            "title": "Mark the email as sent?",
+            "body": "This cannot be undone. The desk will never send this follow-up again.",
+            "verb": "Mark as sent"
+          }
+        },
+        {
+          "id": "resolve_not_sent",
+          "label": "I checked: it was not sent",
+          "endpoint": "/review/FL0c4d8e2f6a19/resolve",
+          "body": {
+            "decision": "not_sent"
+          },
+          "confirm": {
+            "title": "Mark the email as not sent?",
+            "body": "If the email was already sent, a retry will send a second one. Check the mail step first.",
+            "verb": "Mark as not sent"
+          }
+        }
+      ]
+    },
+    {
+      "item_id": "FL3f9a1c2b4d5e",
+      "item_type": "followup",
+      "kind": "unknown",
+      "reason": "crm_unconfirmed",
+      "lead_id": "L3f9a1c2b4d5e",
+      "since": 1000039620,
+      "source": "webhook",
+      "hint": "The CRM may or may not hold this lead. Look in the CRM, then answer crm_present (the row is there: Retry goes straight to the email) or not_sent (the row is not there: Retry asks the CRM again). sent is refused here: no email was ever tried. not_sent: an extra CRM row may need deleting by hand.",
+      "lead_name": "Ada Example",
+      "tab": "action",
+      "title": "The CRM may or may not have this lead",
+      "state_view": "crm_unconfirmed",
+      "reason_text": "The CRM may or may not hold this lead.",
+      "actions": [
+        {
+          "id": "retry",
+          "label": "Retry",
+          "endpoint": "/review/FL3f9a1c2b4d5e/retry",
+          "body": null,
+          "confirm": null
+        },
+        {
+          "id": "resolve_crm_present",
+          "label": "The CRM entry is there",
+          "endpoint": "/review/FL3f9a1c2b4d5e/resolve",
+          "body": {
+            "decision": "crm_present"
+          },
+          "confirm": {
+            "title": "Confirm the CRM entry is there?",
+            "body": "Retry will then go straight to the email.",
+            "verb": "Confirm"
+          }
+        },
+        {
+          "id": "resolve_not_sent",
+          "label": "The CRM entry is not there",
+          "endpoint": "/review/FL3f9a1c2b4d5e/resolve",
+          "body": {
+            "decision": "not_sent"
+          },
+          "confirm": {
+            "title": "Mark the CRM entry as missing?",
+            "body": "Retry will ask the CRM again; if a row was there, delete the extra one by hand.",
+            "verb": "Mark as missing"
+          }
+        }
+      ]
+    },
+    {
+      "item_id": "R13",
+      "item_type": "receipt",
+      "kind": "review",
+      "reason": "incomplete:email",
+      "lead_id": null,
+      "since": 1000039630,
+      "source": "form",
+      "lead_name": null,
+      "tab": "action",
+      "title": "Incomplete request: email is missing",
+      "state_view": "review",
+      "reason_text": "Send a corrected submission with a new request number.",
+      "actions": []
+    },
+    {
+      "item_id": "R15",
+      "item_type": "receipt",
+      "kind": "review",
+      "reason": "internal_error",
+      "lead_id": null,
+      "since": 1000039635,
+      "source": "webhook",
+      "hint": "The desk itself could not decide this receipt (a fault on the desk side, not in the request). A person must look at the desk log. Sending a new request number is not the fix.",
+      "lead_name": null,
+      "tab": "action",
+      "title": "The desk could not decide this request",
+      "state_view": "review",
+      "reason_text": "The desk itself could not decide this receipt (a fault on the desk side, not in the request). A person must look at the desk log. Sending a new request number is not the fix.",
+      "actions": []
+    },
+    {
+      "item_id": "FL5a6b7c8d9e0f",
+      "item_type": "followup",
+      "kind": "stalled",
+      "reason": "pending",
+      "lead_id": "L5a6b7c8d9e0f",
+      "since": 1000039300,
+      "source": "form",
+      "lead_name": "Alan Birch",
+      "tab": "waiting",
+      "title": "Queued longer than 120 s",
+      "state_view": "stalled",
+      "reason_text": "The desk retries by itself; Retry starts it now.",
+      "actions": [
+        {
+          "id": "retry",
+          "label": "Retry",
+          "endpoint": "/review/FL5a6b7c8d9e0f/retry",
+          "body": null,
+          "confirm": null
+        }
+      ]
+    },
+    {
+      "item_id": "FL1b2c3d4e5f60",
+      "item_type": "followup",
+      "kind": "stalled",
+      "reason": "sending",
+      "lead_id": "L1b2c3d4e5f60",
+      "since": 1000039310,
+      "source": "form",
+      "lead_name": "Edsger Lund",
+      "tab": "waiting",
+      "title": "Sending longer than 120 s",
+      "state_view": "stalled",
+      "reason_text": "The desk puts it back by itself after the send timeout.",
+      "actions": []
+    },
+    {
+      "item_id": "O16",
+      "item_type": "receipt",
+      "kind": "stalled",
+      "reason": "open receipt",
+      "lead_id": null,
+      "since": 1000039320,
+      "source": "webhook",
+      "lead_name": null,
+      "tab": "waiting",
+      "title": "Request received, no verdict for longer than 120 s",
+      "state_view": "stalled",
+      "reason_text": "Send the same request number again, or restart the desk.",
+      "actions": []
+    },
+    {
+      "item_id": "D2",
+      "item_type": "receipt",
+      "kind": "duplicate_with_new_info",
+      "reason": "[\"phone\"]",
+      "lead_id": "L3f9a1c2b4d5e",
+      "since": 1000039640,
+      "source": "webhook",
+      "lead_name": "Ada Example",
+      "tab": "info",
+      "title": "Repeat with new details: phone",
+      "state_view": "duplicate_with_new_info",
+      "reason_text": "Informational only, no action needed.",
+      "actions": []
+    },
+    {
+      "item_id": "D17",
+      "item_type": "receipt",
+      "kind": "replay_payload_differs",
+      "reason": "same request number, different payload",
+      "lead_id": "L7b2e9d0c1a34",
+      "since": 1000039650,
+      "source": "form",
+      "lead_name": "Grace Sample",
+      "tab": "info",
+      "title": "The same request came again with different details. The first one stands.",
+      "state_view": "replay_payload_differs",
+      "reason_text": "Informational only, no action needed.",
+      "actions": []
+    }
+  ],
+  "tabs": {
+    "action": 7,
+    "waiting": 3,
+    "info": 2
+  }
+}

@@ -1,0 +1,414 @@
+{
+  "now": 1000040000,
+  "desk_started_at": 1000039400,
+  "mode": {
+    "demo_tools": false,
+    "sample_data": false,
+    "real_services": []
+  },
+  "counts": {
+    "received": 0,
+    "new": 0,
+    "duplicate": 0,
+    "review": 0,
+    "open": 0
+  },
+  "reconciled": true,
+  "refused_at_door": 0,
+  "hung_workers": {
+    "model": 0,
+    "crm": 0,
+    "send": 0,
+    "refresh": 0
+  },
+  "needs_action": 0,
+  "waiting": 0,
+  "followups": {
+    "pending": 0,
+    "sending": 0,
+    "sent": 0,
+    "failed": 0,
+    "unknown": 0,
+    "did_not_finish": 0,
+    "crm_unconfirmed": 0
+  },
+  "doors": [
+    {
+      "source": "form",
+      "received": 0,
+      "last_seen": null
+    },
+    {
+      "source": "webhook",
+      "received": 0,
+      "last_seen": null
+    }
+  ],
+  "series": {
+    "bucket_seconds": 5,
+    "time_field": "decided_at",
+    "buckets": [
+      {
+        "t": 1000039705,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039710,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039715,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039720,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039725,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039730,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039735,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039740,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039745,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039750,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039755,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039760,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039765,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039770,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039775,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039780,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039785,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039790,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039795,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039800,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039805,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039810,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039815,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039820,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039825,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039830,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039835,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039840,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039845,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039850,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039855,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039860,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039865,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039870,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039875,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039880,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039885,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039890,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039895,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039900,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039905,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039910,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039915,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039920,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039925,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039930,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039935,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039940,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039945,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039950,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039955,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039960,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039965,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039970,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039975,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039980,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039985,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039990,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000039995,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      },
+      {
+        "t": 1000040000,
+        "new": 0,
+        "duplicate": 0,
+        "review": 0
+      }
+    ]
+  },
+  "recent": []
+}

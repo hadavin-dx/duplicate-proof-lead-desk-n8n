@@ -1,0 +1,13 @@
+{
+  "n": 1,
+  "ref_prefix": "ui-1000000000000",
+  "answers": [
+    {
+      "ref": "ui-1000000000000-1",
+      "status": 503,
+      "verdict": null,
+      "replayed": false
+    }
+  ],
+  "busy_retries": 6
+}
