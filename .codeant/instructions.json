@@ -1,0 +1,16 @@
+{
+  "instructions": [
+    {
+      "id": "exactly-once",
+      "description": "This is a duplicate-proof lead desk. Flag any change that could process, send or record the same lead twice, claim without a durable idempotency key, or lose a message on retry or crash.",
+      "files": ["src/**/*.py"],
+      "scope": ["pr"]
+    },
+    {
+      "id": "no-real-network-or-data",
+      "description": "Tests and demo code must not open real network connections or contain real personal data or secrets. Only made-up data and local fakes are allowed.",
+      "files": ["tests/**", "demo_only/**", "src/**/*.py"],
+      "scope": ["pr"]
+    }
+  ]
+}

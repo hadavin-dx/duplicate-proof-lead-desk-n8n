@@ -1,0 +1,40 @@
+# SonarQube Cloud analysis (CI-based). Runs on Linux (ubuntu-latest) only: the analysis reads source files and needs no Windows.
+# One method per project: turn OFF "Automatic Analysis" in SonarQube Cloud (project -> Administration -> Analysis Method),
+# otherwise the scan stops with "You are running CI analysis while Automatic Analysis is enabled".
+# The token is the repository secret SONAR_TOKEN (owner-created, read-only to this file; never printed).
+# Coverage is not collected here yet: Sonar shows no coverage numbers until a test run writes coverage.xml.
+name: SonarQube
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+  pull-requests: read
+concurrency:
+  group: sonar-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    name: Build and analyze
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # A pull request from a fork or from Dependabot gets no repository secret: skip it instead of failing.
+    if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (same pin as lint.yml)
+        with:
+          fetch-depth: 0  # Shallow clones are disabled for a better relevancy of analysis
+          persist-credentials: false
+      - name: Cache SonarQube packages
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@4d1dc0c91ee400dcf8a6dddf2f705ac36542e304 # v8.4.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
