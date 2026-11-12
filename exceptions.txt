@@ -24,3 +24,4 @@
 ^[^:]+:[0-9]+:(requirements-dev\.in|(start_all|reset|all)\.sh|log\.info\(|P\.page\(|counts\.info)[^A-Za-z0-9_-]?$
 ^README\.md:[0-9]+:hadavin\.com[^A-Za-z0-9-]?$
 ^SECURITY\.md:[0-9]+:sales@hadavin\.com$
+^sonar-project\.properties:[0-9]+:projectKey=hadavin-dx_[a-z0-9-]+$

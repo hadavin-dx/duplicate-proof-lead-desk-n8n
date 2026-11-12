@@ -1,0 +1,22 @@
+{
+  "code_analysis": {
+    "enabled": true,
+    "features": {
+      "sast_analysis": "enabled",
+      "secrets_analysis": "enabled",
+      "sca_analysis": "enabled"
+    }
+  },
+  "file_filters": {
+    "config": {
+      "include_files": [],
+      "exclude_files": [
+        "tests/portal_fixtures/**",
+        "demo_only/**",
+        "requirements-dev.txt",
+        "requirements-dev-win.txt",
+        "**/*.png"
+      ]
+    }
+  }
+}
