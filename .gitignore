@@ -32,3 +32,5 @@ result.json
 .idea/
 Thumbs.db
 *.env
+.coverage.*
+coverage.xml

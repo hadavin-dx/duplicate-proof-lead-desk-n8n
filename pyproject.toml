@@ -40,3 +40,13 @@ files = ["src", "tools", "scripts/hubspot_probe.py"]
 mypy_path = "src"
 strict = true
 warn_unused_ignores = true
+
+# Coverage for the SonarQube job (.github/workflows/sonar.yml; pytest-cov comes from requirements-coverage.txt).
+# source "." plus relative_files makes every file name in coverage.xml relative to the repository root
+# (for example src/lead_desk/desk.py), which is what sonar.sources=. in sonar-project.properties expects.
+# Tests and demo_only are left out of the figure (Sonar counts tests/ as test code and excludes demo_only).
+# Code that only a separate process runs (a test starts the desk as its own process) is not measured.
+[tool.coverage.run]
+relative_files = true
+source = ["."]
+omit = ["tests/**", "demo_only/**", ".venv*/**"]

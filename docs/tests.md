@@ -16,6 +16,13 @@ Linux (Python 3.12 matches the lock file), with the `.venv` folder switched on a
     python -m pip install --require-hashes -r requirements-dev.txt
     python -m pytest -q                                  # the tests
 
+The SonarQube job (`.github/workflows/sonar.yml`) also measures how much of the code the tests run. On Linux, instead of the install line above, install the dev lock and the coverage lock (it adds `pytest-cov` and `coverage`) in one pip call, as the job does; pip stops with an error if a package is pinned to two different versions in the two files. Then add the coverage options:
+
+    python -m pip install --require-hashes --only-binary=:all: -r requirements-dev.txt -r requirements-coverage.txt
+    python -m pytest -q --cov --cov-report=xml:coverage.xml
+
+The settings are in `pyproject.toml` (`[tool.coverage.run]`); the report `coverage.xml` is read by the SonarQube scan through `sonar.python.coverage.reportPaths`. The browser tests skip without Playwright, so the figure counts code that only they reach as not run.
+
 The desk alone: `PYTHONPATH=src python -m lead_desk.server`. The crash scene: `PYTHONPATH=src python scripts/crash_desk.py`, then write a point name (for example `D2`) into the flag file it prints, and the next time the desk reaches that point it ends at once. On Windows set `PYTHONPATH` with `;` between entries when two are needed (`src;.`). The tests set the path for their own processes. Writing `blind` instead of `keyed` in the start command starts a mail system that cannot recognise repeats.
 
 The desk's settings (the `DESK_*` names, plus the extra names of the real-services script and `N8N_URL`, `N8N_API_KEY_FILE` and the `DPLD_*` names; n8n's own `N8N_PORT` and similar are in `docs/n8n-recipe.md`) are in `docs/settings.md`; the exit codes of the desk are in `docs/limits.md`.

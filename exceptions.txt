@@ -7,6 +7,8 @@
 ^[^:]+:[0-9]+:(localhost|github\.com|docs\.github\.com|docs\.n8n\.io|example\.com|example\.test|example\.invalid)[^A-Za-z0-9-]?$
 ^\.github/workflows/[a-z]+\.yml:[0-9]+:([0-9a-f]{40}|[0-9a-f]{64})$
 ^requirements-dev(-win)?\.txt:[0-9]+:[0-9a-f]{64}$
+^requirements-coverage\.txt:[0-9]+:[0-9a-f]{64}$
+^[^:]+:[0-9]+:requirements-coverage\.in[^A-Za-z0-9_-]?$
 ^src/lead_desk/desk\.py:[0-9]+:threading\.local[^A-Za-z0-9_-]?$
 ^tests/[a-z_0-9]+\.py:[0-9]+:test_[a-z0-9]{1,12}(_[a-z0-9]{1,12}){0,8}$
 ^tests/test_server_hardening\.py:[0-9]+:http:/{2}[a]:[b]:[c]/$
