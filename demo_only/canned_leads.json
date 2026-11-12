@@ -1,0 +1,8 @@
+[
+  {"name": "Ada Example", "email": "Ada@example.com", "phone": "555 0100", "company": "Example Ltd", "message": "Please call me."},
+  {"name": "Grace Sample", "email": "grace@example.com", "phone": "555 0101", "company": "Sample Works", "message": "Quote for 20 seats."},
+  {"name": "Linus Demo", "email": "linus@example.com", "company": "Demo Systems", "message": "Is there a trial?"},
+  {"name": "Margaret Test", "email": "margaret@example.com", "phone": "555 0103", "message": "Send details."},
+  {"name": "Alan Birch", "email": "alan@example.com", "phone": "555 0104", "company": "Birch Works"},
+  {"name": "Edsger Lund", "email": "edsger@example.com", "message": "Call after 3 pm."}
+]
