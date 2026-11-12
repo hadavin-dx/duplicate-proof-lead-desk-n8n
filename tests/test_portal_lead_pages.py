@@ -424,18 +424,54 @@ def test_the_sidebar_column_is_one_colour_to_the_page_bottom_at_1100(env: Any, s
         _new(rig, f"s-{i}", f"Sidney Hart{i}", f"s{i}@example.test")
 
     def body(page: Any, base: str) -> None:
-        import io
-
-        from PIL import Image
+        import base64
 
         page.goto(base + "/ui/#/leads")
         page.wait_for_selector("[data-lead-id]")
         page.wait_for_timeout(500)
         height = page.evaluate("() => document.documentElement.scrollHeight")
         assert height > 900, height  # the page really is taller than the window
-        img = Image.open(io.BytesIO(page.screenshot(full_page=True))).convert("RGB")
-        above, below = img.getpixel((60, 880)), img.getpixel((60, height - 40))
-        assert all(abs(a - b) <= 6 for a, b in zip(above, below, strict=True)), (above, below)
+        assert height - 40 > 900, ("second sample point is inside the rail", height)  # the rail is 900 px high
+        # A third point, on the brand mark (a fixed element in the rail's header): its colour is far from the rail's,
+        # so a reader that returned one value for every point would be caught below.
+        box = page.locator(".mark").first.bounding_box()
+        assert box is not None
+        mark_pt = [round(box["x"]) + 4, round(box["y"] + box["height"] / 2)]
+        # The browser reads the screenshot's pixels itself (no image library): a blank page in the same browser
+        # decodes the PNG onto a canvas. A blank page, because the portal page's own rules could refuse a data: image.
+        shot = "data:image/png;base64," + base64.b64encode(page.screenshot(full_page=True)).decode()
+        reader = page.context.new_page()
+        try:
+            got = reader.evaluate(
+                """async ([src, points]) => {
+                    const img = new Image();
+                    img.src = src;
+                    await img.decode();
+                    const canvas = document.createElement("canvas");
+                    canvas.width = img.naturalWidth;
+                    canvas.height = img.naturalHeight;
+                    const ctx = canvas.getContext("2d");
+                    ctx.drawImage(img, 0, 0);
+                    return {size: [canvas.width, canvas.height],
+                            px: points.map(([x, y]) => Array.from(ctx.getImageData(x, y, 1, 1).data))};
+                }""",
+                [shot, [[60, 880], [60, height - 40], mark_pt]],
+            )
+        finally:
+            reader.close()
+        assert got["size"][1] > height - 40, got["size"]  # both sample points lie inside the screenshot
+        above, below, mark = got["px"]
+        assert max(abs(a - b) for a, b in zip(above[:3], mark[:3], strict=True)) > 60, (
+            "the reader returns the same colour for different points",
+            above,
+            mark,
+        )
+        assert above[3] == below[3] == 255, ("not opaque", above, below)  # opaque: the PNG's own colours
+        assert all(abs(a - b) <= 6 for a, b in zip(above[:3], below[:3], strict=True)), (
+            "sidebar and strip differ",
+            above,
+            below,
+        )
 
     _browse(base, body, width=1100, scheme=scheme)
 

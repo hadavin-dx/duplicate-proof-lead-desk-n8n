@@ -259,14 +259,14 @@ button, input, select { font: inherit; color: inherit; }
 .search .ico { position: absolute; left: var(--s3); width: 16px; height: 16px; color: var(--ink-3); pointer-events: none; }
 .search .input { padding-left: var(--s6); width: 320px; }
 .tabs { display: flex; gap: var(--s1); border-bottom: 1px solid var(--border-soft); }
-.tab { display: inline-flex; align-items: center; gap: var(--s2); padding: var(--s2) var(--s4); border: 0; border-bottom: 2px solid transparent; background: none; color: var(--ink-2); font-weight: 600; cursor: pointer; margin-bottom: 0; border-radius: var(--r-ctl) var(--r-ctl) 0 0; }
+.tab { white-space: nowrap; display: inline-flex; align-items: center; gap: var(--s2); padding: var(--s2) var(--s4); border: 0; border-bottom: 2px solid transparent; background: none; color: var(--ink-2); font-weight: 600; cursor: pointer; margin-bottom: 0; border-radius: var(--r-ctl) var(--r-ctl) 0 0; }
 .tab:hover { color: var(--ink); background: var(--surface-2); }
 .tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
 .tab-count { font-size: var(--t-xs); padding: 0 var(--s2); border-radius: var(--r-pill); background: var(--neutral-bg); color: var(--neutral-fg); font-variant-numeric: tabular-nums; }
 .tab[aria-selected="true"] .tab-count { background: var(--accent-wash); color: var(--accent); }
 
 /* table */
-.table-wrap { background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--r-card); box-shadow: var(--shadow); overflow: auto; }
+.table-wrap { background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--r-card); box-shadow: var(--shadow); overflow: auto; position: relative; } /* the screen-reader-only text of a masked value is positioned: without this its containing block lies outside the scroller and a 1 px span at the far right of a wide table stretches the whole page */
 .table { width: 100%; border-collapse: collapse; font-size: var(--t-base); }
 .table th { text-align: left; font: 600 var(--t-sm) / 1.3 var(--font); color: var(--ink-2); letter-spacing: 0; text-transform: none; padding: var(--s3) var(--s4); background: var(--surface-2); border-bottom: 1px solid var(--border-soft); white-space: nowrap; }
 .table td { padding: var(--s3) var(--s4); border-bottom: 1px solid var(--border-soft); vertical-align: middle; }
@@ -327,8 +327,11 @@ dialog { color: var(--ink); background: var(--surface); border: 1px solid var(--
 dialog::backdrop { background: var(--scrim); }
 .drawer { margin: 0 0 0 auto; height: 100vh; max-height: none; width: min(600px, 100vw); max-width: 100vw; border-width: 0 0 0 1px; box-shadow: var(--shadow-pop); }
 .drawer[open] { display: flex; flex-direction: column; animation: slide-in var(--dur) ease-out; }
-.drawer-head { display: flex; align-items: center; gap: var(--s3); padding: var(--s4) var(--s5); border-bottom: 1px solid var(--border-soft); }
-.drawer-head h2 { font-size: var(--t-lg); font-weight: 650; letter-spacing: -0.01em; }
+.drawer-head { display: flex; align-items: flex-start; gap: var(--s3); padding: var(--s4) var(--s5); border-bottom: 1px solid var(--border-soft); }
+.drawer-head h2 { font-size: var(--t-lg); font-weight: 650; letter-spacing: -0.01em; min-width: 0; overflow-wrap: anywhere; min-height: 36px; display: flex; align-items: center; }
+.drawer-head .pill, .drawer-head .icon-btn { flex: none; }
+/* a long title wraps onto many lines: the status chip and the close button stay at the top, next to its first line (36 px is the height of the close button; the chip is centred on it) */
+.drawer-head .pill { margin-top: calc((36px - 1.25rem) / 2); }
 .drawer-body { padding: var(--s5); overflow: auto; display: grid; gap: var(--s5); align-content: start; flex: 1; }
 .dialog { margin: auto; width: min(460px, calc(100vw - var(--s6))); border-radius: var(--r-card); box-shadow: var(--shadow-pop); padding: var(--s5); }
 .dialog[open] { display: grid; gap: var(--s4); animation: pop var(--dur) ease-out; }
@@ -336,7 +339,7 @@ dialog::backdrop { background: var(--scrim); }
 .dialog-warn { border-color: var(--warn-solid); }
 .dialog-head { display: flex; align-items: center; gap: var(--s3); }
 .dialog-head .ico { width: 24px; height: 24px; color: var(--warn-solid); flex: none; }
-.dialog p { color: var(--ink-2); }
+.dialog p { color: var(--ink-2); overflow-wrap: anywhere; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: var(--s2); }
 @keyframes slide-in { from { transform: translateX(var(--s5)); opacity: 0; } }
 @keyframes pop { from { transform: translateY(var(--s2)); opacity: 0; } }
@@ -509,7 +512,7 @@ dialog::backdrop { background: var(--scrim-solid); }
 .ov.is-stale .pill { box-shadow: inset 0 0 0 1px currentColor; }
 .ov-asof { color: var(--ink-3); font-weight: 400; }
 .toast { align-items: center; }
-.toast-text { flex: 1; }
+.toast-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .toast-x { width: 24px; height: 24px; display: grid; place-items: center; border: 0; background: transparent; color: var(--ink-3); border-radius: var(--r-sm); cursor: pointer; flex: none; }
 .toast-x:hover { background: var(--surface-2); color: var(--ink); }
 .toast-x .ico { width: 14px; height: 14px; margin: 0; color: inherit; }
@@ -574,7 +577,7 @@ dialog::backdrop { background: var(--scrim-solid); }
 
 /* ===== strip, form controls and tables ===== */
 /* the demo line and the page content share one left edge on wide screens (the page is capped at 1240 px and centred) */
-@media (min-width: 861px) { .strip { padding-left: max(var(--s6), calc((100% - 1240px) / 2 + var(--s6))); padding-right: max(var(--s6), calc((100% - 1240px) / 2 + var(--s6))); } }
+@media (width > 860px) { .strip { padding-left: max(var(--s6), calc((100% - 1240px) / 2 + var(--s6))); padding-right: max(var(--s6), calc((100% - 1240px) / 2 + var(--s6))); } }
 /* a small inline id or code: neutral chip, never the colour of a status */
 .chip-id { display: inline-block; padding: 2px var(--s2); border-radius: var(--r-sm); background: var(--neutral-bg); color: var(--neutral-fg); }
 .toolbar { align-items: center; }
@@ -613,10 +616,12 @@ dialog::backdrop { background: var(--scrim-solid); }
 .drawer-more { background: var(--surface); border-top: 1px solid var(--border-faint); padding: var(--s1) 0; }
 
 /* 1200 and below: a slimmer rail and page margin give the tables room; Received stacks its two lines */
-@media (max-width: 1200px) {
+@media (width > 860px) and (width <= 1200px) { /* the exact complement of the (max-width: 860px) rules above (no gap at 860.5 px); not below: those come earlier in this file and would lose to these */
   .shell { grid-template-columns: 208px minmax(0, 1fr); background: linear-gradient(to right, var(--rail-bot) 207px, var(--border-soft) 207px 208px, transparent 208px); }
   .page { padding-left: var(--s5); padding-right: var(--s5); }
   .strip { padding-left: var(--s5); padding-right: var(--s5); }
+}
+@media (max-width: 1200px) {
   .log-when { flex-direction: column; align-items: flex-start; gap: 0; }
   .log-out .table td:nth-child(2) { max-width: none; }
   .log-out .table td:nth-child(4) { min-width: 10rem; }

@@ -269,7 +269,7 @@
             {
               "id": "result",
               "name": "result",
-              "value": "={{ $(\"Read the demo outbox\").item.json.count == 1 && $(\"Read the demo CRM\").item.json.count == 1 ? \"PASS\" : \"MISMATCH\" }}",
+              "value": "={{ $(\"Wait for the desk to finish\").first().json.statuses.split(\",\").filter(s => s == \"new\").length == 1 && $(\"Wait for the desk to finish\").first().json.statuses.split(\",\").filter(s => s == \"duplicate\").length == 9 && $(\"Read the demo outbox\").item.json.count == 1 && $(\"Read the demo CRM\").item.json.count == 1 ? \"PASS\" : \"MISMATCH\" }}",
               "type": "string"
             }
           ]

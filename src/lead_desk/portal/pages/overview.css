@@ -118,3 +118,6 @@
 /* cards of one row: content spread evenly inside the taller height, so no card ends in an empty band */
 .ov .grid.ov-mid > div > .card { align-content: start; }
 
+
+/* a phone: two tiles per row (five minmax(0,1fr) columns cannot hold their labels), the labels may wrap, the donut legend goes under the ring */
+@media (max-width: 860px) { .ov { grid-template-columns: minmax(0, 1fr); } .ov .ov-kpis.ov-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ov-kpis .kpi-label { white-space: normal; } .ov-mid .donut { grid-template-columns: minmax(0, 1fr); justify-items: center; } }

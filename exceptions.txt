@@ -15,6 +15,8 @@
 ^(README|contract)\.md:[0-9]+:host\.docker\.internal[^A-Za-z0-9-]?$
 ^tests/test_portal_api\.py:[0-9]+:http:/{2}localhost\.$
 ^tests/test_portal_api\.py:[0-9]+:0\.0\.0\.0$
+^requirements-browser(-win)?\.txt:[0-9]+:[0-9a-f]{64}$
+^[^:]+:[0-9]+:requirements-browser\.in[^A-Za-z0-9_-]?$
 ^tests/test_portal_api\.py:[0-9]+:http:/{2}a$
 ^tests/test_server_hardening\.py:[0-9]+:test_(reply[_]write[_]fails[_]after[_]commit[_]followup[_]still[_]runs|300[_]simultaneous[_]connections[_]all[_]get[_]an[_]answer[_]with[_]retry)$
 ^[^:]+:[0-9]+:-{20,}$

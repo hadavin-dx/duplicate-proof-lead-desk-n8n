@@ -25,6 +25,22 @@ FILL_TOKEN = "<<" + "FILL"
 REQUIRE_SCAN_ENV = "DPLD_REQUIRE_SCAN"  # when set (CI), a missing gitleaks program fails instead of skipping
 
 
+def _gitleaks_exe() -> str | None:
+    """The gitleaks program as an absolute path, or None. A bare name (GITLEAKS_BIN=gitleaks) is looked up on PATH, like
+    a shell would; a name with a folder part (./gl/gitleaks) is made absolute from the current folder. Neither is
+    resolved through symbolic links (a shim or link stays the program that was named). Absolute because the scans run
+    with cwd=<another folder>, where a relative path would not be found. A value with a folder part that names nothing
+    is a ValueError that names the variable (not a FileNotFoundError from deep inside the scan)."""
+    raw = os.environ.get(GITLEAKS_ENV) or "gitleaks"
+    if not os.path.dirname(raw):
+        found = shutil.which(raw)
+        return os.path.abspath(found) if found else None
+    path = os.path.abspath(raw)
+    if not (os.path.exists(path) or (os.name == "nt" and os.path.exists(path + ".exe"))):
+        raise ValueError(f"{GITLEAKS_ENV}={raw!r} does not exist (looked for {path}); fix the path or unset it")
+    return path
+
+
 def _git(cwd: Path, *args: str) -> str:
     p = subprocess.run(  # noqa: S603
         ["git", *args],  # noqa: S607
@@ -123,7 +139,7 @@ def test_hygiene_scan_public(tmp_path: Path) -> None:
     left = hygiene.pipeline(REPO, patterns, exceptions)
     assert not left, "hardcoded literals found (file:line:match):\n" + "\n".join(left[:50])
     # 3. gitleaks (release binary; CI installs it with a checked SHA-256)
-    exe = os.environ.get(GITLEAKS_ENV) or shutil.which("gitleaks")
+    exe = _gitleaks_exe()
     if not exe and not os.environ.get(REQUIRE_SCAN_ENV):
         pytest.skip(
             f"no gitleaks program on PATH (set {GITLEAKS_ENV}); set {REQUIRE_SCAN_ENV}=1 to make this a failure"
@@ -173,8 +189,9 @@ def test_hygiene_scan_public(tmp_path: Path) -> None:
     scans = [("dir", tree), ("git", REPO)] if os.environ.get(REQUIRE_SCAN_ENV) else [("dir", tree)]
     if len(scans) == 1:
         warnings.warn(f"gitleaks history scan skipped: set {REQUIRE_SCAN_ENV}=1 to scan the history", stacklevel=1)
-    for sub, target in scans:
-        p = subprocess.run([exe, sub, *common, "--exit-code", "1", str(target)], capture_output=True, check=False)  # noqa: S603
+    for sub, target in scans:  # from the root of the scanned folder with ".", exactly like lint.yml: the path rules in
+        # .gitleaks.toml start with ^ and need paths relative to the root (an absolute temp path would never match them)
+        p = subprocess.run([exe, sub, *common, "--exit-code", "1", "."], cwd=target, capture_output=True, check=False)  # noqa: S603
         assert p.returncode == 0, f"gitleaks {sub} reported findings (values are redacted)"
 
 
@@ -193,6 +210,9 @@ def test_exceptions_narrow(tmp_path: Path) -> None:
     long_name = "test_" + "_".join(["aaaaaaaaaaaa"] * 4)  # five parts of at most 12 letters: allowed in tests/ only
     files = {
         "requirements-dev.txt": h40,  # a 40-hex id is not a hash line
+        "requirements-browser.txt": h40,  # the same for the browser lock
+        "docs/requirements-browser.txt": h64,  # a hash line counts only in the file in the repository root
+        "old-requirements-browser.txt": h64,  # a name that only ends like a lock file
         "README.md": h64,
         "src/x.py": long_name,
         "tests/t.py": "test_" + "a" * 45,  # one part over the cap
@@ -207,7 +227,16 @@ def test_exceptions_narrow(tmp_path: Path) -> None:
     _git(tmp_path, "add", ".")
     left = hygiene.pipeline(tmp_path, REPO / "patterns.txt", REPO / "exceptions.txt")
     reported = {ln.split(":", 1)[0] for ln in left}
-    expected = {"requirements-dev.txt", "README.md", "src/x.py", "tests/t.py", "docs/h.md"}
+    expected = {
+        "requirements-dev.txt",
+        "requirements-browser.txt",
+        "docs/requirements-browser.txt",
+        "old-requirements-browser.txt",
+        "README.md",
+        "src/x.py",
+        "tests/t.py",
+        "docs/h.md",
+    }
     assert reported == expected, sorted(reported)
 
 
@@ -330,3 +359,119 @@ def test_workflows_are_pinned_and_limited() -> None:
     assert _workflow_problems(good.replace("contents: read", "contents: write")) != []  # write at the top
     assert _workflow_problems(good.replace(perm, "permissions: write-all" + NL)) != []
     assert _workflow_problems(good + NL.join(["on:", "  pull_request_target:", ""])) != []
+
+
+def test_lock_file_hashes_are_allowed_only_at_the_root(tmp_path: Path) -> None:
+    """A 64-hex value is allowed in the real root lock files (and 40-hex ids in the workflow files) and nowhere else:
+    the same line in docs/requirements-dev.txt, in a nested workflow folder or in a look-alike name must be reported."""
+    exe = _gitleaks_exe()
+    if not exe and not os.environ.get(REQUIRE_SCAN_ENV):
+        pytest.skip(
+            f"no gitleaks program on PATH (set {GITLEAKS_ENV}); set {REQUIRE_SCAN_ENV}=1 to make this a failure"
+        )
+    assert exe, f"gitleaks binary not found: put it on PATH or set {GITLEAKS_ENV}"
+    h64 = "".join(["a1b2c3d4", "e5f6a7b8"] * 4)  # built from parts: this file must not hold a hash-like literal itself
+    h40 = "".join(["a1b2c3d4e5"] * 4)
+    ok = {
+        "requirements-dev.txt": h64,
+        "requirements-dev-win.txt": h64,
+        "requirements-coverage.txt": h64,
+        ".github/workflows/ok.yml": h40,
+    }
+    bad = {
+        "docs/requirements-dev.txt": h64,
+        "sub/requirements-dev-win.txt": h64,
+        "x-requirements-dev.txt": h64,
+        "docs/.github/workflows/no.yml": h40,
+        "docs/.github/no.yml": h40,
+    }
+    toml = REPO / ".gitleaks.toml"
+    for name, files in (("ok", ok), ("bad", bad)):
+        tree = tmp_path / name
+        for rel, value in files.items():
+            (tree / rel).parent.mkdir(parents=True, exist_ok=True)
+            (tree / rel).write_text(f"x=={value} --hash={value}" + chr(10), encoding="utf-8")
+        report = tmp_path / f"{name}.json"
+        cmd = [exe, "dir", "--no-banner", "--redact", "--ignore-gitleaks-allow", "--config", str(toml)]
+        subprocess.run([*cmd, "--report-format", "json", "--report-path", str(report), "."], cwd=tree, check=False)  # noqa: S603
+        rows = json.loads(report.read_text(encoding="utf-8") or "[]")
+        found = {x["File"].replace(chr(92), "/") for x in rows}
+        if name == "ok":
+            assert not found, f"allowed lock or workflow files were reported: {sorted(found)}"
+        else:
+            assert found == set(bad), (
+                f"not reported (must be): {sorted(set(bad) - found)}; unexpected: {sorted(found - set(bad))}"
+            )
+            rules = {x["RuleID"] for x in rows}  # every one of them is reported by the long-hex rule and no other
+            assert rules == {"long-hex-token"}, f"reported by: {sorted(rules)}"
+
+
+def test_a_relative_gitleaks_path_still_works_when_the_scan_changes_folder(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """GITLEAKS_BIN may be relative (for example ./gl/gitleaks): the scans run with cwd=<other folder>, so the path must
+    be made absolute first. Runs the planting test above with a relative path, started from the repository folder."""
+    exe = _gitleaks_exe()
+    if not exe and not os.environ.get(REQUIRE_SCAN_ENV):
+        pytest.skip(f"no gitleaks program on PATH (set {GITLEAKS_ENV})")
+    assert exe, f"gitleaks binary not found: put it on PATH or set {GITLEAKS_ENV}"
+    monkeypatch.chdir(REPO)
+    try:
+        relative = os.path.relpath(exe, REPO)
+    except ValueError:  # Windows: the program and the repository are on different drives, no relative path exists
+        pytest.skip("gitleaks and the repository are on different drives: no relative path between them")
+    assert not os.path.isabs(relative)
+    monkeypatch.setenv(GITLEAKS_ENV, relative)
+    test_lock_file_hashes_are_allowed_only_at_the_root(tmp_path)
+
+
+def _fake_program(folder: Path, name: str) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    exe = folder / (name + (".exe" if os.name == "nt" else ""))
+    exe.write_text("not a real program" + chr(10), encoding="utf-8")
+    exe.chmod(0o755)
+    return exe
+
+
+def test_a_bare_gitleaks_bin_is_looked_up_on_path_not_in_the_current_folder(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """GITLEAKS_BIN=name (no folder part) means "the program of that name on PATH", as in a shell: it must not become
+    <current folder>/name (which does not exist)."""
+    found = _fake_program(tmp_path / "bin", "gl-fake-tool")
+    elsewhere = tmp_path / "cwd"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setenv("PATH", str(found.parent))
+    monkeypatch.setenv(GITLEAKS_ENV, "gl-fake-tool")
+    assert os.path.normcase(_gitleaks_exe()) == os.path.normcase(str(found))  # Windows may answer .EXE for .exe
+    monkeypatch.setenv(GITLEAKS_ENV, "gl-no-such-tool")
+    assert _gitleaks_exe() is None
+
+
+def test_a_gitleaks_bin_with_a_folder_part_is_made_absolute_but_symbolic_links_are_kept(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A shim or link stays the program that was named: the path is made absolute, not resolved to its target."""
+    real = _fake_program(tmp_path / "real", "gl-real")
+    link = tmp_path / "cwd" / "gl-link"
+    link.parent.mkdir()
+    try:
+        link.symlink_to(real)
+    except OSError:  # pragma: no cover - Windows without the right to make links
+        pytest.skip("no symbolic links here")
+    monkeypatch.chdir(link.parent)
+    monkeypatch.setenv(GITLEAKS_ENV, os.path.join(".", "gl-link"))
+    assert _gitleaks_exe() == os.path.abspath(link)
+    assert _gitleaks_exe() != str(real.resolve())
+
+
+def test_a_gitleaks_bin_path_that_does_not_exist_is_a_clear_error_naming_the_variable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Not a None (that would skip the scan unless it is required) and not a FileNotFoundError from the scan itself."""
+    for raw in (str(tmp_path / "no-such-dir" / "gitleaks"), os.path.join(".", "no-such-gl")):
+        monkeypatch.setenv(GITLEAKS_ENV, raw)
+        with pytest.raises(ValueError, match=GITLEAKS_ENV) as e:
+            _gitleaks_exe()
+        assert "does not exist" in str(e.value)

@@ -14,10 +14,9 @@ if ($env:RESET_STOP_WAIT_SECONDS) {
 }
 $db = (python -c "from lead_desk.config import Config; print(Config.from_env().db_path)").Trim()
 $dataDir = Split-Path -Parent $db
-$allowed = [System.IO.Path]::GetFullPath((Join-Path (Get-Location).Path 'data'))
-if ([System.IO.Path]::IsPathRooted($dataDir)) { $abs = $dataDir } else { $abs = Join-Path (Get-Location).Path $dataDir }
-$actual = [System.IO.Path]::GetFullPath($abs)
-if (-not ($actual -ieq $allowed -or $actual.StartsWith($allowed + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase))) {
+# real paths: a junction or symlink inside data\ that points elsewhere is followed (same check as reset.sh)
+$inside = python -c "import os, sys; d = os.path.normcase(os.path.realpath(sys.argv[1])); r = os.path.normcase(os.path.realpath('data')); print(d == r or d.startswith(r + os.sep))" $dataDir
+if ("$inside".Trim() -ne 'True') {
     Write-Host "refused: the database path is not inside this repository's data folder, so nothing was stopped or deleted"
     exit 2
 }

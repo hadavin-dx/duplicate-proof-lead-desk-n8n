@@ -105,3 +105,6 @@
 .ov-proof .dm-vs { align-self: flex-start; max-width: none; min-width: 5.5rem; padding: 0 var(--s2); }
 .ov-proof > .dm-proof > .eyebrow { min-height: calc(var(--t-xl) * 1.1); display: flex; align-items: center; }
 .ov-proof .dm-proof > .pill, .ov-proof .dm-proof > span.faint { margin-left: auto; align-self: flex-start; margin-top: calc((var(--t-xl) * 1.1 - 1.5rem) / 2); }
+
+/* a phone: the figures of the cross-check wrap onto the next line instead of widening the page */
+@media (max-width: 860px) { .dm-proof-row { flex-wrap: wrap; } }

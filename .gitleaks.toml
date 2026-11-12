@@ -49,6 +49,9 @@ regexTarget = "match"
 regexes = ['''^hadavin\.com[^A-Za-z0-9-]?$''']
 paths = ['''(^|[/\\])(README|SECURITY)\.md$''']
 [[rules.allowlists]]
+regexTarget = "match"  # the file name requirements-browser.in (the browser test lock input) ends like a host name; its own entry, not part of the list below
+regexes = ['''^requirements-browser\.in[^A-Za-z0-9_-]?$''']
+[[rules.allowlists]]
 paths = ['''(^|[/\\])src/lead_desk/constants\.py$''']  # the one home of the vendor host names; this rule only
 [[rules.allowlists]]
 regexTarget = "match"  # file names and code words that end like a host name (same list as exceptions.txt)
@@ -85,10 +88,17 @@ id = "long-hex-token"
 description = "A run of 32 or more hex characters that is not exactly a git id or a SHA-256 checksum"
 regex = '''\b[A-Fa-f0-9]{32,}\b'''
 [[rules.allowlists]]
+condition = "AND"  # the hash lines of the browser lock files (a SHA-256 in requirements-browser.txt or requirements-browser-win.txt); its own entry, the entry below stays as it is
+regexTarget = "match"
+regexes = ['''^[0-9a-f]{64}$''']
+paths = ['''^requirements-browser(-win)?\.txt$''']
+[[rules.allowlists]]
 condition = "AND"  # a git id or checksum is accepted only in the lock files and the workflow files, nowhere else
 regexTarget = "match"
 regexes = ['''^([0-9a-f]{40}|[0-9a-f]{64})$''']
-paths = ['''(^|[/\\])requirements-(dev(-win)?|coverage)\.txt$''', '''\.github[/\\]workflows[/\\][a-z]+\.yml$''']
+# The path patterns start with ^ and the scan must run from the repository root (`gitleaks dir .`, as lint.yml and
+# tests/test_hygiene.py do): the path is then relative to the root, so docs/requirements-dev.txt does NOT match.
+paths = ['''^requirements-(dev(-win)?|coverage)\.txt$''', '''^\.github[/\\]workflows[/\\][a-z]+\.yml$''']
 
 # Global allowlist: none by path. Add an entry here only as regex plus a stated reason, never a whole file.
 [[allowlists]]

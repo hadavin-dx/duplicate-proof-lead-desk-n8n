@@ -13,14 +13,15 @@
 .err-detail { text-align: left; }
 
 .need { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; gap: var(--s3) var(--s4); align-items: start; align-content: start; position: relative; overflow: hidden; }
-.need-main { display: grid; gap: var(--s3); align-content: start; align-self: start; min-width: 0; }
+.need-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s3); align-content: start; align-self: start; min-width: 0; }
 .need-head { display: flex; align-items: flex-start; flex-wrap: nowrap; gap: var(--s3); row-gap: var(--s1); }
 .need-head h2 { font-size: var(--t-md); font-weight: 600; letter-spacing: -0.01em; min-width: 0; text-wrap: pretty; }
 .need-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s4); font-size: var(--t-sm); color: var(--ink-2); }
 .need-who, .need-since { display: inline-flex; align-items: center; gap: var(--s1); }
-.need-who { color: var(--ink); font-weight: 600; }
+.need-who { color: var(--ink); font-weight: 600; min-width: 0; max-width: 100%; }
 .need-who .ico, .need-since .ico { width: 14px; height: 14px; color: var(--ink-3); }
 .need-why { color: var(--ink); max-width: 80ch; }
+.need-head h2, .need-why, .need-notes li { overflow-wrap: anywhere; }
 .need-actions { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; padding-top: var(--s2); border-top: 0; margin-top: 0; }
 .need details.details { border: 0; padding: 0; }
 
@@ -77,3 +78,6 @@
 .needs-define { margin: var(--s2) 0 0; padding-left: var(--s5); display: grid; gap: var(--s1); }
 .need-check { display: inline-flex; align-items: center; gap: var(--s1); font-size: var(--t-sm); color: var(--ink-2); font-weight: 500; }
 .need-check .ico { width: 14px; height: 14px; color: var(--ink-3); }
+
+/* a phone: the three tabs scroll sideways inside their own row instead of widening the page; a scroller clips what lies outside it, so the active-tab underline gets 1 px of room (padding-bottom) and the focus ring is drawn inside the tab */
+@media (max-width: 860px) { .tabs { overflow-x: auto; padding-bottom: 1px; } .tabs .tab { flex: none; } .tabs .tab:focus-visible { outline-offset: -2px; box-shadow: none; } }

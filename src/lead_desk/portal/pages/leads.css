@@ -93,9 +93,14 @@ details.details .kv { margin-top: var(--s3); grid-template-columns: max-content 
 .lead-cell .eye-btn { flex: none; }
 .chip-with-note { display: grid; gap: var(--s1); justify-items: start; }
 .leads-out .table td:last-child { min-width: 7.5rem; }
+/* Company: one line with an ellipsis, like the name (app.css does the same up to 1200 px with 9rem) */
+@media (width > 1200px) { .leads-out .table td:nth-child(2) { max-width: 26ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } }
 
 /* owner initial and a step chip (the colour follows the step) */
 .lead-owner { display: inline-flex; align-items: center; gap: var(--s2); }
 .owner-name { overflow: hidden; text-overflow: ellipsis; }
 .avatar { flex: none; width: 22px; height: 22px; border-radius: var(--r-pill); display: inline-grid; place-items: center; font-size: var(--t-xs); font-weight: 700; background: var(--accent-wash); color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent); }
 .ledger-value .pill { white-space: normal; text-align: left; }
+
+/* a phone: the search box may shrink (its own 400 px width stretched the whole page) and the hint under it may wrap */
+@media (max-width: 860px) { .toolbar-block { grid-template-columns: minmax(0, 1fr); } .toolbar .search { min-width: 0; } .search-hint { white-space: normal; } }

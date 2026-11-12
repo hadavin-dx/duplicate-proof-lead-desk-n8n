@@ -2,8 +2,32 @@
 
 Allow-list by key name: a key that is not listed is dropped, so a field n8n adds later cannot leak.
 Never kept: ids, instance id, credentials, webhook ids, pinData, tags, project owner, timestamps.
-Inside node parameters (free-form) strings are cleaned: absolute URLs other than localhost, and e-mail
-addresses other than example.test / example.com / example.invalid, are replaced.
+Inside node parameters (free-form) strings are cleaned: absolute URLs (any scheme; JSON-escaped slashes as in
+https:\\/\\/host too), data: and javascript: links, and e-mail addresses (letters of any alphabet) other than
+example.test / example.com / example.invalid, are replaced. Node names are cleaned too, and the "connections" part is
+rewritten with the cleaned names, so the references stay consistent.
+One exception: a plain web address (scheme http, https, ws or wss) to localhost or 127.0.0.1 (a port may follow;
+user:password in front of the host is never allowed) is kept, but only up to the end of its path: the query string
+(?...) and the fragment (#...) are dropped, because an API key can sit in a query. Every other scheme with a localhost
+host (file://localhost/..., postgres://localhost/..., ftp://localhost/...) is replaced whole.
+A tab, a carriage return or a line feed right after a localhost host (a browser ignores
+it, so `http://localhost<TAB>@host` reads as user localhost at host) makes the address a look-alike: that address, the
+break and the next run of non-blank characters are replaced whole.
+Never kept: webhook ids (the id field). The webhook PATH is kept as it is, so a secret written inside a path stays.
+What is NOT cleaned (the free text of a name or a parameter is not parsed), stated plainly:
+ - an address without a scheme, such as //host/path or host:5432; a bare host name or IP address; a path that is not a
+   URL; the scheme's colon and slashes written with percent signs (%3A%2F%2F) or with backslashes (http:\\\\host);
+ - a secret inside the path of a kept localhost address (/webhook/<token>); a secret inside a path as a %3F-encoded
+   query (only a real ? or # ends the path);
+ - a data: link without a media type (data:,text and data:;base64,...), and U+FE6B (small at-sign) or an ideographic
+   full stop in an e-mail address (only the ASCII "@" and the full-width "@" are read as the at-sign);
+ - the keys of a dictionary inside node parameters (only the values are cleaned; node names and the keys of the
+   "connections" part are cleaned);
+ - an expression inside a node name that refers to another node by an old name when two names became the same (the
+   second gets " (2)").
+Over-cleaning, also by design: an address that an expression completes, such as "http://localhost:5678/x?" + $json.q,
+is read as a plain address and loses its "?" and what follows on the same run of characters.
+Check the output by eye before it goes into a public repo.
 
 Usage: python -m tools.scrub_n8n_export in.json out.json
 The webhook path is kept (a plain word); n8n creates its own ids on import.
@@ -37,13 +61,48 @@ NODE = (
     "alwaysOutputData",
     "continueOnFail",  # node settings that change what a run does
 )
-URL = re.compile(r"https?://(?!(?:localhost|127\.0\.0\.1)(?:[:/]|$))[^\s\"'<>]+")
-MAIL = re.compile(r"[A-Za-z0-9._%+-]+@(?!(?:[A-Za-z0-9-]+\.)*example\.(?:com|test|invalid)\b)[A-Za-z0-9.-]+")
+# No look-behind in front of the scheme: a look-behind made an address right after a digit, "-", "+" or "." (a digit,
+# then http, then the rest of the address) survive whole. The scheme is at most 32 characters, so the search stays
+# linear. The leftmost match starts at the true start of the scheme, so a character in front of it (a digit, "-")
+# stays and the address after it goes. The slashes may be JSON-escaped (:\/\/).
+# Any scheme (http, https, ftp, ssh, postgres, file, ...) is matched whole: a host, a path or a user:password part must
+# not survive. The one exception is decided in _url_replacement, not in the pattern (a pattern with the exception in
+# it would also match from the middle of a scheme).
+URL = re.compile(r"(?:[A-Za-z][A-Za-z0-9+.-]{0,31}:(?:\\?/){2}|(?:https?|ftps?|wss?):/(?!/))[^\s\"'<>]+")
+# What may stay: http, https, ws or wss to localhost or 127.0.0.1 (optionally :digits, and the host must END there:
+# localhost:x@host and 127.0.0.1.host are other hosts). Only up to the end of the path: no query, no fragment.
+_LOCAL_WEB = re.compile(
+    r"((?:https?|wss?)://(?:localhost|127\.0\.0\.1)(?::[0-9]+)?)(?=[/?#]|\Z)([^?#]*)[?#]?.*\Z", re.DOTALL
+)
+# A tab, CR or LF right after a local host: browsers drop it, so what follows reads as part of the same address.
+# The whole thing (scheme, host, the break and the next run of non-blank characters) is replaced; linear: no
+# nested repetition, fixed prefix.
+_LOCAL_BROKEN = re.compile(
+    r"[A-Za-z][A-Za-z0-9+.-]{0,31}:(?:\\?/){2}(?:localhost|127\.0\.0\.1)(?::[0-9]*)?[\t\r\n]+[^\s\"'<>]*", re.IGNORECASE
+)
+# links that carry content or code instead of a host
+ACTIVE_LINK = re.compile(
+    r"(?:(?:javascript|vbscript):[^\s\"'<>]+|data:[A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+[;,][^\s\"'<>]*)", re.IGNORECASE
+)
+# letters of any alphabet (\w is Unicode for str patterns) in the local part and the domain; @ or its full-width form.
+# The allowed domain must END there: the allowed name with more labels or letters after it is another, real domain.
+MAIL = re.compile(
+    r"(?<![\w.%+-])[\w.%+-]+[@\uFF20](?!(?:[\w-]+\.)*example\.(?:com|test|invalid)(?![\w-]|\.[\w-]))[\w.-]+"
+)
+REPLACEMENT_URL = "http://localhost/REPLACE-ME"
+REPLACEMENT_MAIL = "someone@example.test"
+
+
+def _url_replacement(m: re.Match[str]) -> str:
+    """A web address to this computer keeps scheme, host, port and path (no query, no fragment); all others go."""
+    local = _LOCAL_WEB.fullmatch(m.group(0))
+    return local.group(1) + local.group(2) if local else REPLACEMENT_URL
 
 
 def _clean(v: Any) -> Any:
     if isinstance(v, str):
-        return MAIL.sub("someone@example.test", URL.sub("http://localhost/REPLACE-ME", v))
+        broken = _LOCAL_BROKEN.sub(REPLACEMENT_URL, v)
+        return MAIL.sub(REPLACEMENT_MAIL, ACTIVE_LINK.sub(REPLACEMENT_URL, URL.sub(_url_replacement, broken)))
     if isinstance(v, list):
         return [_clean(x) for x in v]
     if isinstance(v, dict):
@@ -51,15 +110,49 @@ def _clean(v: Any) -> Any:
     return v
 
 
+def _rename(value: Any, names: dict[str, str]) -> Any:
+    """The connections part: every key and every "node" value is a node name; use the cleaned name."""
+    if isinstance(value, list):
+        return [_rename(x, names) for x in value]
+    if isinstance(value, dict):
+        return {
+            names.get(k, _clean(k)): (
+                names.get(x, _clean(x)) if k == "node" and isinstance(x, str) else _rename(x, names)
+            )
+            for k, x in value.items()
+        }
+    return _clean(value)
+
+
+def _unique(name: str, taken: set[str]) -> str:
+    """A cleaned name that no other node has (two different addresses clean to the same text)."""
+    out, n = name, 1
+    while out in taken:
+        n += 1
+        out = f"{name} ({n})"
+    taken.add(out)
+    return out
+
+
 def scrub(workflow: dict[str, Any]) -> dict[str, Any]:
     """Return a new, scrubbed workflow; the input is not changed."""
     wf = copy.deepcopy(workflow)
-    out: dict[str, Any] = {k: wf[k] for k in TOP if k in wf and k != "nodes"}
+    out: dict[str, Any] = {k: wf[k] for k in TOP if k in wf and k not in ("nodes", "connections")}
     if isinstance(wf.get("settings"), dict):
         out["settings"] = {k: v for k, v in wf["settings"].items() if k in SETTINGS}
-    out["nodes"] = [
-        {"id": f"node-{i}", **{k: _clean(n[k]) for k in NODE if k in n}} for i, n in enumerate(wf.get("nodes", []), 1)
-    ]
+    names: dict[str, str] = {}
+    taken: set[str] = set()
+    nodes = []
+    for i, n in enumerate(wf.get("nodes", []), 1):
+        node = {"id": f"node-{i}", **{k: _clean(n[k]) for k in NODE if k in n}}
+        if isinstance(n.get("name"), str):
+            if n["name"] not in names:
+                names[n["name"]] = _unique(node["name"], taken)
+            node["name"] = names[n["name"]]
+        nodes.append(node)
+    out["nodes"] = nodes
+    if "connections" in wf:
+        out["connections"] = _rename(wf["connections"], names)
     out["name"] = _clean(out.get("name", "workflow"))
     return out
 
