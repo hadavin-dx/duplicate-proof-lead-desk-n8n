@@ -1,0 +1,79 @@
+/* Needs a person. Tokens from app.css only. */
+.needs-list { display: grid; gap: var(--s4); align-content: start; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.needs-list > .explainer, .needs-list > .state { grid-column: 1 / -1; }
+.tabs { margin-bottom: calc(-1 * var(--s1)); }
+
+.explainer { display: block; padding: var(--s3) var(--s4); background: var(--surface); border-color: var(--border-soft); box-shadow: var(--shadow); }
+.explainer summary { display: flex; align-items: center; gap: var(--s2); cursor: pointer; font-weight: 600; color: var(--ink); list-style: none; }
+.explainer summary::-webkit-details-marker { display: none; }
+.explainer summary::after { content: "\203A"; margin-left: auto; color: var(--ink-3); transition: transform var(--dur); }
+.explainer[open] summary::after { transform: rotate(90deg); }
+.explainer summary .ico { width: 18px; height: 18px; color: var(--ink-3); }
+.explainer p { max-width: 80ch; margin-top: var(--s2); }
+.err-detail { text-align: left; }
+
+.need { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; gap: var(--s3) var(--s4); align-items: start; align-content: start; position: relative; overflow: hidden; }
+.need-main { display: grid; gap: var(--s3); align-content: start; align-self: start; min-width: 0; }
+.need-head { display: flex; align-items: flex-start; flex-wrap: nowrap; gap: var(--s3); row-gap: var(--s1); }
+.need-head h2 { font-size: var(--t-md); font-weight: 600; letter-spacing: -0.01em; min-width: 0; text-wrap: pretty; }
+.need-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s4); font-size: var(--t-sm); color: var(--ink-2); }
+.need-who, .need-since { display: inline-flex; align-items: center; gap: var(--s1); }
+.need-who { color: var(--ink); font-weight: 600; }
+.need-who .ico, .need-since .ico { width: 14px; height: 14px; color: var(--ink-3); }
+.need-why { color: var(--ink); max-width: 80ch; }
+.need-actions { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; padding-top: var(--s2); border-top: 0; margin-top: 0; }
+.need details.details { border: 0; padding: 0; }
+
+.need-actions .btn .ico { color: var(--warn-solid); }
+.need-next { display: flex; align-items: flex-start; gap: var(--s2); color: var(--ink-2); font-size: var(--t-sm); }
+.need-next .ico { width: 16px; height: 16px; flex: none; margin-top: var(--s1); color: var(--ink-3); }
+.btn-outline:hover { background: var(--surface-2); border-color: var(--ink-3); }
+.need[data-kind="failed"]::before { content: ""; position: absolute; inset: 0 0 auto 0; background: linear-gradient(90deg, var(--bad-solid), transparent 55%); opacity: .9; height: 3px; }
+.need[data-kind="failed"] { border-color: color-mix(in srgb, var(--bad-solid) 35%, var(--border-soft)); }
+.need[data-view="unknown"] { border-color: color-mix(in srgb, var(--hot-solid) 35%, var(--border-soft)); }
+.need[data-view="crm_unconfirmed"] { border-color: color-mix(in srgb, var(--teal-solid) 35%, var(--border-soft)); }
+
+/* page layout */
+/* only a card with a decision to make carries a coloured top line (red failed, amber unknown); the others stay plain */
+.need[data-view="unknown"]::before, .need[data-view="crm_unconfirmed"]::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; opacity: .9; }
+.need[data-view="unknown"]::before { background: linear-gradient(90deg, var(--hot-solid), transparent 55%); }
+.need[data-view="crm_unconfirmed"]::before { background: linear-gradient(90deg, var(--teal-solid), transparent 55%); }
+.needs-list > .need-alone { grid-column: 1 / -1; }
+.needs-list > .need { align-self: stretch; } /* cards of one row are as high as each other */
+
+/* one line saying what the tab is, notes of a merged information card, a single card uses the full width */
+.needs-list > .needs-lead { grid-column: 1 / -1; font-size: var(--t-sm); }
+.need-notes { margin: 0; padding-left: var(--s5); display: grid; gap: var(--s1); color: var(--ink-2); font-size: var(--t-sm); }
+.needs-list.needs-one { grid-template-columns: minmax(0, 1fr); }
+.needs-list > .stack { grid-column: 1 / -1; }
+/* a single card takes the whole row: text left, buttons right (an odd last card is one column wide, like the others) */
+.needs-one > .need { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto; align-items: center; }
+.needs-one > .need .need-actions { padding-top: 0; border-top: 0; }
+@media (max-width: 1100px) { .needs-list { grid-template-columns: minmax(0, 1fr); } .needs-one > .need { grid-template-columns: minmax(0, 1fr); } .needs-one > .need .need-actions { padding-top: var(--s4); border-top: 1px solid var(--border-soft); } }
+
+/* the same header on every card: the chip keeps its size, the title takes the rest of the line */
+.need-head > .pill { flex: none; margin-top: 2px; }
+/* the cards of a row are equally tall, the text flows from the top and the buttons sit at the bottom edge of every card (no divider line, so a short card shows no band above its buttons); a card without buttons has no empty second row */
+.needs-list, body .needs-list { align-items: start; }
+.need:not(:has(.need-actions)) { grid-template-rows: minmax(0, 1fr); }
+.needs-one > .need { grid-template-rows: auto; }
+.needs-one > .need .need-actions { margin-top: 0; }
+@media (max-width: 1100px) { .needs-one > .need .need-actions { margin-top: var(--s4); } }
+
+/* the spare height of an equal-height row goes between the parts of a card, not into one hole */
+/* one colour per state: a card that did not finish is amber on its top line and its border, like its chip */
+.need[data-kind="failed"][data-view="did_not_finish"] { border-color: color-mix(in srgb, var(--warn-solid) 35%, var(--border-soft)); }
+.need[data-kind="failed"][data-view="did_not_finish"]::before { background: linear-gradient(90deg, var(--warn-solid), transparent 55%); }
+
+/* titles that wrap must not push one card's body below its neighbour: two lines are reserved while the cards sit side by side */
+.need-head h2 { line-height: 1.3; }
+/* the parts of a card start at the top, so a one-line title is followed straight by its details (no empty band) */
+.need-main { align-content: start; }
+.need-since { white-space: nowrap; }
+.needs-paused { margin: 0 0 var(--s3); grid-column: 1 / -1; }
+
+/* the badge meanings: a short list, only the badges on the page */
+.needs-lead > p { margin: 0; }
+.needs-define { margin: var(--s2) 0 0; padding-left: var(--s5); display: grid; gap: var(--s1); }
+.need-check { display: inline-flex; align-items: center; gap: var(--s1); font-size: var(--t-sm); color: var(--ink-2); font-weight: 500; }
+.need-check .ico { width: 14px; height: 14px; color: var(--ink-3); }

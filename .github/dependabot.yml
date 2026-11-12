@@ -1,0 +1,9 @@
+# Dependabot: GitHub Actions only (the dev tools are pinned with hashes by hand, and the desk has no dependencies).
+# Dependabot alerts are a repository setting and do not need this file.
+# limit: this file only asks for version updates of GitHub Actions; no result of it is claimed here.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

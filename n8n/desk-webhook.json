@@ -1,0 +1,108 @@
+{
+  "name": "Lead Desk: Email Intake",
+  "active": true,
+  "connections": {
+    "Receive the submission": {
+      "main": [
+        [
+          {
+            "node": "Map to the desk format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map to the desk format": {
+      "main": [
+        [
+          {
+            "node": "Send to the desk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "id": "node-1",
+      "name": "Receive the submission",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "desk-webhook",
+        "responseMode": "lastNode",
+        "responseData": "firstEntryJson"
+      }
+    },
+    {
+      "id": "node-2",
+      "name": "Map to the desk format",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "source",
+              "name": "source",
+              "value": "webhook",
+              "type": "string"
+            },
+            {
+              "id": "source_ref",
+              "name": "source_ref",
+              "value": "={{ $json.body.message_id }}",
+              "type": "string"
+            },
+            {
+              "id": "payload",
+              "name": "payload",
+              "value": "={{ {\"name\": $json.body.from_name, \"email\": $json.body.from_email, \"message\": $json.body.body} }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "node-3",
+      "name": "Send to the desk",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8765/leads",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { source: $json.source, source_ref: $json.source_ref, payload: $json.payload } }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    }
+  ]
+}

@@ -1,0 +1,281 @@
+{
+  "name": "Lead Desk: Duplicate Test (10 at once)",
+  "active": true,
+  "connections": {
+    "Start the check from a web call": {
+      "main": [
+        [
+          {
+            "node": "Make ten requests for one lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Make ten requests for one lead": {
+      "main": [
+        [
+          {
+            "node": "Send all ten at the same moment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send all ten at the same moment": {
+      "main": [
+        [
+          {
+            "node": "Wait for the desk to finish",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for the desk to finish": {
+      "main": [
+        [
+          {
+            "node": "Read the desk counts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the desk counts": {
+      "main": [
+        [
+          {
+            "node": "Read the demo CRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the demo CRM": {
+      "main": [
+        [
+          {
+            "node": "Read the demo outbox",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the demo outbox": {
+      "main": [
+        [
+          {
+            "node": "Show the result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start the check": {
+      "main": [
+        [
+          {
+            "node": "Make ten requests for one lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "id": "node-1",
+      "name": "Start the check",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "node-2",
+      "name": "Start the check from a web call",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "proof-run",
+        "responseMode": "lastNode",
+        "responseData": "firstEntryJson"
+      }
+    },
+    {
+      "id": "node-3",
+      "name": "Make ten requests for one lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const run = Date.now();\nreturn Array.from({length: 10}, (_, i) => ({json: {submission_id: 'proof-' + run + '-' + (i + 1), name: 'Proof Person', email: 'proof' + run + '@example.com', phone: '555 0199', company: 'Example Ltd', message: 'Ten at once.'}}));"
+      }
+    },
+    {
+      "id": "node-4",
+      "name": "Send all ten at the same moment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:5679/webhook/desk-form",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 10,
+              "batchInterval": 0
+            }
+          },
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "node-5",
+      "name": "Wait for the desk to finish",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "jsCode": "await new Promise(r => setTimeout(r, 4000));\nreturn [{json: {statuses: $input.all().map(i => i.json.verdict || 'no verdict').join(',')}}];"
+      }
+    },
+    {
+      "id": "node-6",
+      "name": "Read the desk counts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://127.0.0.1:8765/counts?expected=1",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-7",
+      "name": "Read the demo CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://127.0.0.1:8766/fake/crm",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-8",
+      "name": "Read the demo outbox",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://127.0.0.1:8766/fake/outbox",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-9",
+      "name": "Show the result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "emails",
+              "name": "emails",
+              "value": "={{ $('Read the demo outbox').item.json.count }}",
+              "type": "number"
+            },
+            {
+              "id": "crm_rows",
+              "name": "crm_rows",
+              "value": "={{ $('Read the demo CRM').item.json.count }}",
+              "type": "number"
+            },
+            {
+              "id": "expected",
+              "name": "expected",
+              "value": "1",
+              "type": "number"
+            },
+            {
+              "id": "desk_new",
+              "name": "desk_new",
+              "value": "={{ $('Read the desk counts').item.json.new }}",
+              "type": "number"
+            },
+            {
+              "id": "desk_duplicate",
+              "name": "desk_duplicate",
+              "value": "={{ $('Read the desk counts').item.json.duplicate }}",
+              "type": "number"
+            },
+            {
+              "id": "result",
+              "name": "result",
+              "value": "={{ $(\"Read the demo outbox\").item.json.count == 1 && $(\"Read the demo CRM\").item.json.count == 1 ? \"PASS\" : \"MISMATCH\" }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    }
+  ]
+}
