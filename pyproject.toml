@@ -1,0 +1,42 @@
+[project]
+name = "duplicate-proof-lead-desk"
+version = "0.0.0"
+description = "Demo: a lead desk that does not create a second lead record or a second follow-up email."
+requires-python = ">=3.12"
+license = "LicenseRef-All-Rights-Reserved"  # see LICENSE; no build-system, so it does not touch the lock
+dependencies = []
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "."]
+testpaths = ["tests"]
+# test command: python -m pytest -q
+# Run commands set PYTHONPATH=src (there is no build-system); see contract.md, Run commands.
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = [".venv", "data"]
+
+[tool.ruff.lint]
+# S = flake8-bandit rules; PLR2004 = magic value used in a comparison (numbers belong in constants.py / Config).
+select = ["E", "F", "W", "I", "S", "PLR2004"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may use assert and literal numbers/addresses in assertions.
+"tests/**" = ["S101", "S105", "S106", "S311", "PLR2004"]
+"demo_only/**" = ["S311"]
+# Helper script: long SQL strings and literal expected counts are its point.
+"scripts/check_schema.py" = ["E501", "PLR2004"]
+
+# bandit scans src/, tools/ and scripts/; demo_only/ and tests/ are excluded (command: bandit -ll -r src tools scripts -c pyproject.toml).
+[tool.bandit]
+exclude_dirs = ["tests", ".venv", "demo_only"]
+
+# mypy runs on src/ and tools/ (commands: mypy --platform linux  and  mypy --platform win32; both must pass, because
+# lockfile.py and server.py branch on sys.platform).
+[tool.mypy]
+python_version = "3.12"
+files = ["src", "tools", "scripts/hubspot_probe.py"]
+mypy_path = "src"
+strict = true
+warn_unused_ignores = true
