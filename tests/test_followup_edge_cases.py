@@ -436,13 +436,13 @@ def test_reads_do_not_raise(env) -> None:
 # invisible and direction-changing characters
 # =====
 @pytest.mark.parametrize("field", ["name", "company", "phone"])
-@pytest.mark.parametrize("ch", ["​", "‮", " ", " ", "﻿"])
+@pytest.mark.parametrize("ch", ["​", "\u202e", " ", " ", "﻿"])
 def test_invisible_characters_in_short_fields_are_refused(field, ch) -> None:
     payload = {"name": "Ada", "email": "ada@example.test", field: f"x{ch}y"}
     assert identity.check_payload(payload).reason == f"bad_field:{field}"
 
 
-@pytest.mark.parametrize("ch", ["‮", " ", " "])
+@pytest.mark.parametrize("ch", ["\u202e", " ", " "])
 def test_message_refuses_separators_and_direction_marks(ch) -> None:
     base = {"name": "Ada", "email": "ada@example.test"}
     assert identity.check_payload({**base, "message": f"hi{ch}there"}).reason == "bad_field:message"

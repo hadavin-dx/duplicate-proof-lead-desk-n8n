@@ -429,7 +429,7 @@ def test_demo_launchers_name_the_demo_file_and_the_off_switch() -> None:
     assert ps.index("DESK_LEADFLOW_FILE") < ps.index("python -c")  # before the first helper call
     assert sh.index("DESK_LEADFLOW_FILE") < sh.index("python -c")
     assert "-cne 'off'" in ps and "demo_only/leadflow.json" in ps and "reminder@example.test" in ps
-    assert '!= off ] && [ -n "$DESK_LEADFLOW_FILE" ]' in sh and "export DESK_NUDGE_TO" in sh
+    assert '!= off ]] && [[ -n "$DESK_LEADFLOW_FILE" ]]' in sh and "export DESK_NUDGE_TO" in sh
     assert (REPO / "demo_only" / "leadflow.json").is_file()
     for text in (ps, sh):
         assert "set DESK_LEADFLOW_FILE=off" in text

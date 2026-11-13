@@ -35,7 +35,7 @@ jobs:
       # the scan runs first: ruff, mypy and bandit write cache folders into the tree and gitleaks dir would read them
       - name: Install gitleaks (release binary, checksum checked)
         run: |
-          curl -sSfL -o gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfL -o gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum --check -
           mkdir "${RUNNER_TEMP}/gitleaks"
           tar -xzf gitleaks.tar.gz -C "${RUNNER_TEMP}/gitleaks" gitleaks
@@ -48,7 +48,8 @@ jobs:
           "${RUNNER_TEMP}/gitleaks/gitleaks" git . --config .gitleaks.toml --redact --no-banner --ignore-gitleaks-allow
 
       - name: Install the pinned dev tools (hashes are checked)
-        run: python -m pip install --require-hashes -r requirements-dev.txt
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements-dev.txt
 
       - name: Ruff (lint and format)
         run: |
@@ -73,9 +74,9 @@ jobs:
           git grep -n -o -I -E -f patterns.txt -- . > "${RUNNER_TEMP}/literals.txt"
           status=$?
           set -e
-          if [ "$status" -gt 1 ]; then echo "git grep failed (status $status)"; exit 1; fi
+          if [[ "$status" -gt 1 ]]; then echo "git grep failed (status $status)"; exit 1; fi
           grep -v -E -f exceptions.txt "${RUNNER_TEMP}/literals.txt" > "${RUNNER_TEMP}/literals-left.txt" || true
-          if [ -s "${RUNNER_TEMP}/literals-left.txt" ]; then
+          if [[ -s "${RUNNER_TEMP}/literals-left.txt" ]]; then
             echo "Hardcoded literals found (path:line:match):"
             cat "${RUNNER_TEMP}/literals-left.txt"
             exit 1

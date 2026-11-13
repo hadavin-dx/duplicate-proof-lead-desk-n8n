@@ -104,10 +104,15 @@ def test_implicit_tls_port(certs: Certs, pwfile: Path, servers: list[Any]) -> No
 
 
 def test_recipients_are_spread_and_stable(certs: Certs, pwfile: Path, servers: list[Any]) -> None:
-    ob = outbox(start(certs, servers), certs, pwfile)
+    srv = start(certs, servers)
+    ob = outbox(srv, certs, pwfile)
     picks = {ob.recipient_for(f"RUN1-L{i}") for i in range(40)}
     assert picks == set(INBOXES)
-    assert ob.recipient_for("RUN1-L7") == ob.recipient_for("RUN1-L7")
+    keys = [f"RUN1-L{i}" for i in range(40)]
+    again = outbox(
+        srv, certs, pwfile
+    )  # a second outbox object (same process): its pick must not depend on the object; a restart is NOT proven here
+    assert [again.recipient_for(k) for k in keys] == [ob.recipient_for(k) for k in keys]
 
 
 def test_certificate_not_trusted_is_unreachable_and_nothing_is_sent(

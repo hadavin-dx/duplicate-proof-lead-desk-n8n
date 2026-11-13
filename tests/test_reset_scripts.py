@@ -18,16 +18,32 @@ from support import REPO, wait_until
 WINDOWS = sys.platform == "win32"
 
 
-def _run(script: str, db: Path, **extra: str) -> subprocess.CompletedProcess[str]:
+def _run(
+    script: str,
+    db: Path,
+    *args: str,
+    first_on_path: Path | None = None,
+    shell: str = "bash",
+    code: str | None = None,
+    **extra: str,
+) -> subprocess.CompletedProcess[str]:
+    """first_on_path: a folder (holding a stand-in `python`) searched before this interpreter's folder; the
+    desk's own DESK_LEADFLOW_FILE and DESK_NUDGE_TO of the calling shell are then left out of the environment.
+    code: shell text run with `shell -c` instead of the script file (not on Windows)."""
     env = {**os.environ, "DESK_DB_PATH": str(db), **extra}
     env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env.get("PATH", "")
+    if first_on_path is not None:
+        env["PATH"] = str(first_on_path) + os.pathsep + env["PATH"]
+        for name in ("DESK_LEADFLOW_FILE", "DESK_NUDGE_TO"):
+            if name not in extra:
+                env.pop(name, None)
     if WINDOWS:
         powershell = shutil.which("powershell")
         if powershell is None:
             pytest.skip("Windows PowerShell is not installed")
         cmd = [powershell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(REPO / "scripts" / script)]
     else:
-        cmd = ["bash", str(REPO / "scripts" / script)]
+        cmd = [shell, "-c", code] if code is not None else [shell, str(REPO / "scripts" / script), *args]
     return subprocess.run(  # noqa: S603 (our own script and a path made by the test)
         cmd, cwd=REPO, env=env, capture_output=True, text=True, timeout=120, check=False
     )
@@ -162,6 +178,17 @@ def test_reset_sh_waits_for_a_desk_that_needs_a_few_seconds_to_stop(book: Path) 
     assert not alive_after and not book.exists() and not (book.parent / "desk.pid").exists()
 
 
+@pytest.mark.skipif(WINDOWS, reason="reset.sh is the non-Windows script")
+@pytest.mark.parametrize("name", ["desk.pid", "fakes.pid"])
+def test_reset_sh_deletes_an_empty_pid_file(book: Path, name: str) -> None:
+    """An empty pid file names no process: it is removed and the reset goes on (the check is -e, not -s)."""
+    pidfile = book.parent / name
+    pidfile.write_text("", encoding="utf-8")
+    done = _run(SCRIPT, book, DESK_PORT=str(_free_port()), DESK_FAKES_PORT=str(_free_port()))
+    assert done.returncode == 0, (done.stdout, done.stderr)
+    assert not pidfile.exists() and not book.exists()
+
+
 @pytest.mark.skipif(WINDOWS, reason="a process that ended but is not collected yet is a POSIX state")
 def test_reset_sh_treats_a_pid_file_of_an_ended_but_uncollected_process_as_gone(book: Path) -> None:
     ended = subprocess.Popen([sys.executable, "-c", "pass"])  # noqa: S603 (our own interpreter)
@@ -253,3 +280,140 @@ def test_reset_refuses_when_the_lock_file_cannot_be_tested_and_creates_none_on_a
         listener.listen(1)
         again = _run(SCRIPT, book, DESK_PORT=str(listener.getsockname()[1]), DESK_FAKES_PORT=str(_free_port()))
     assert again.returncode == 4 and not lock.exists(), (again.stdout, again.stderr)
+
+
+# A stand-in `python` for scripts/start_all.sh: it answers the three `python -c` helper calls (data folder, demo-server
+# port, desk port) with fixed values, writes one line per `python -m <module>` launch with the DESK_LEADFLOW_FILE and
+# DESK_NUDGE_TO it saw, and records every call, so the test sees what the shell [[ ]] tests decided without
+# starting a server.
+_STUB_PYTHON = """#!/usr/bin/env bash
+echo "$*" >> "${STUB_DATA}/calls.log"
+if [[ "$1" == "-c" ]]; then
+  case "$2" in
+    *parent*) echo "${STUB_DATA}";;
+    *fakes_port*) echo 1234;;
+    *.port*) echo 4321;;
+  esac
+elif [[ "$1" == "-m" ]]; then
+  echo "LEADFLOW=[${DESK_LEADFLOW_FILE-<unset>}] NUDGE=[${DESK_NUDGE_TO-<unset>}]" > "${STUB_DATA}/launch-$2.rec"
+fi
+"""
+
+
+def _start_all(
+    tmp_path: Path, *args: str, pid_file: str = "", **env: str
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    """Run scripts/start_all.sh with the stub python first on PATH; returns the result and the stub's data folder."""
+    data = tmp_path / "data"
+    data.mkdir()
+    if pid_file:
+        (data / pid_file).write_text("1\n", encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stub = bin_dir / "python"
+    stub.write_text(_STUB_PYTHON, encoding="utf-8")
+    stub.chmod(0o755)
+    done = _run("start_all.sh", tmp_path / "unused.sqlite3", *args, first_on_path=bin_dir, STUB_DATA=str(data), **env)
+    return done, data
+
+
+def _launch(data: Path) -> str:
+    """The env line the stub saw for the desk launch (a background process: wait, bounded, until it has written)."""
+    rec = data / "launch-lead_desk.server.rec"
+    wait_until(rec.exists, timeout=10, what="the stub python launched as the desk")
+    return rec.read_text(encoding="utf-8").strip()
+
+
+@pytest.mark.skipif(WINDOWS, reason="start_all.sh is the non-Windows script")
+@pytest.mark.parametrize(
+    ("env", "expected"),
+    [
+        ({}, "LEADFLOW=[demo_only/leadflow.json] NUDGE=[reminder@example.test]"),  # default: on
+        ({"DESK_LEADFLOW_FILE": "off"}, "LEADFLOW=[off] NUDGE=[<unset>]"),  # script line 12: != off
+        ({"DESK_LEADFLOW_FILE": ""}, "LEADFLOW=[] NUDGE=[<unset>]"),  # script line 12: -n
+        ({"DESK_LEADFLOW_FILE": "x.json"}, "LEADFLOW=[x.json] NUDGE=[reminder@example.test]"),
+        ({"DESK_LEADFLOW_FILE": "of"}, "LEADFLOW=[of] NUDGE=[reminder@example.test]"),  # a near miss of "off" is a file
+        ({"DESK_LEADFLOW_FILE": "*"}, "LEADFLOW=[*] NUDGE=[reminder@example.test]"),  # no pattern matching in [[ ]] rhs
+        (
+            {"DESK_LEADFLOW_FILE": "x.json", "DESK_NUDGE_TO": "me@example.test"},
+            "LEADFLOW=[x.json] NUDGE=[me@example.test]",
+        ),
+        (
+            {"DESK_LEADFLOW_FILE": "x.json", "DESK_NUDGE_TO": ""},
+            "LEADFLOW=[x.json] NUDGE=[]",
+        ),  # a set empty value is kept
+    ],
+)
+def test_start_all_sh_turns_the_reminder_on_only_for_a_real_leadflow_file(
+    tmp_path: Path, env: dict[str, str], expected: str
+) -> None:
+    """Runs the real scripts/start_all.sh (the [[ ]] test of its leadflow line, which SonarCloud shell:S7688 made
+    us rewrite) with a stub `python`, and reads the environment the launched desk process would get."""
+    done, data = _start_all(tmp_path, **env)
+    assert done.returncode == 0, (done.stdout, done.stderr)
+    assert _launch(data) == expected
+
+
+@pytest.mark.skipif(WINDOWS, reason="start_all.sh is the non-Windows script")
+@pytest.mark.parametrize("pid_file", ["fakes.pid", "desk.pid"])
+def test_start_all_sh_refuses_when_either_pid_file_exists_and_starts_nothing(tmp_path: Path, pid_file: str) -> None:
+    """The pid-file check is the other rewritten [[ ]] test (two tests joined by ||): either file alone refuses."""
+    done, data = _start_all(tmp_path, pid_file=pid_file)
+    assert done.returncode == 1, (done.stdout, done.stderr)
+    assert "pid files exist" in done.stderr
+    assert not list(data.glob("launch-*.rec")), "a server was launched although a pid file existed"
+    assert sorted(p.name for p in data.glob("*.pid")) == [pid_file]  # and the script wrote no pid file of its own
+
+
+@pytest.mark.skipif(WINDOWS, reason="start_all.sh is the non-Windows script")
+def test_start_all_sh_refuses_an_unknown_mode_before_it_calls_python(tmp_path: Path) -> None:
+    """The mode check is a `case`, not a changed [[ ]] line; this test only guards that the early exit stays first."""
+    done, data = _start_all(tmp_path, "sideways")
+    assert done.returncode == 1, (done.stdout, done.stderr)
+    assert "mode must be keyed or blind" in done.stderr
+    assert not (data / "calls.log").exists(), "python was called before the mode was checked"
+
+
+@pytest.mark.skipif(WINDOWS or shutil.which("dash") is None, reason="needs dash (the sh of Debian and Ubuntu)")
+@pytest.mark.parametrize("bash_version", [None, "5.2.0"], ids=["BASH_VERSION-unset", "BASH_VERSION-exported"])
+@pytest.mark.parametrize("script", ["reset.sh", "start_all.sh"])
+def test_the_shell_scripts_refuse_to_run_under_dash_and_delete_or_start_nothing(
+    tmp_path: Path, script: str, bash_version: str | None
+) -> None:
+    """[[ ]] is not in dash: its `[[: not found` counts as a false test, which would skip reset.sh's refusal of a
+    database outside ./data. The scripts therefore stop at once when the shell cannot run [[ ]]. The test is of the
+    feature, not of the variable BASH_VERSION: dash takes that from the environment, so a name test is bypassed
+    (the second case exports it with a made-up value)."""
+    db = tmp_path / "desk.sqlite3"
+    db.write_text("made-up lead book", encoding="utf-8")
+    bin_dir = (
+        tmp_path / "bin"
+    )  # a stand-in python first on PATH, so that without the guard start_all.sh starts nothing real
+    bin_dir.mkdir()
+    (bin_dir / "python").write_text(_STUB_PYTHON, encoding="utf-8")
+    (bin_dir / "python").chmod(0o755)
+    stub = bin_dir if script == "start_all.sh" else None
+    extra = {} if bash_version is None else {"BASH_VERSION": bash_version}
+    done = _run(script, db, shell=shutil.which("dash") or "dash", first_on_path=stub, STUB_DATA=str(tmp_path), **extra)
+    assert done.returncode == 2, (done.stdout, done.stderr)
+    assert "run this script with bash" in done.stderr and "not bash" in done.stderr
+    assert "not found" not in done.stderr, "a [[ line ran under dash"
+    assert db.read_text(encoding="utf-8") == "made-up lead book"
+    assert not (tmp_path / "calls.log").exists(), "the stand-in python was called"
+
+
+@pytest.mark.skipif(WINDOWS or shutil.which("dash") is None, reason="needs dash (the sh of Debian and Ubuntu)")
+@pytest.mark.parametrize("script", ["reset.sh", "start_all.sh"])
+def test_the_guard_line_refuses_under_dash_even_without_set_e(tmp_path: Path, script: str) -> None:
+    """The guard joins its probe and `echo bash` with `&&`. With `;` it would still print `bash` after the failed
+    probe, and only the `set -e` of the script (which comes before the guard) would hide that. This runs the guard
+    line alone, with no `set -e`, so the `&&` is pinned by itself."""
+    lines = (REPO / "scripts" / script).read_text(encoding="utf-8").splitlines()
+    guard = [line for line in lines if line.startswith('case "$( (eval ')]
+    assert len(guard) == 1, "the guard line was not found exactly once"
+    db = tmp_path / "unused.sqlite3"
+    after = guard[0] + "\necho PAST-THE-GUARD"
+    refused = _run(script, db, shell=shutil.which("dash") or "dash", code=after)
+    assert refused.returncode == 2 and "PAST-THE-GUARD" not in refused.stdout, (refused.stdout, refused.stderr)
+    passed = _run(script, db, code=after)
+    assert passed.returncode == 0 and "PAST-THE-GUARD" in passed.stdout, (passed.stdout, passed.stderr)
