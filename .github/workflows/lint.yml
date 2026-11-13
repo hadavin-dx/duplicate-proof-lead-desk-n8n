@@ -1,0 +1,99 @@
+# Checks that run on every pull request and every push to main.
+# Rules for this file: every third-party Action is pinned to a full commit SHA (version in the comment, looked up
+# 2026-11-09); read-only permissions; no repository secrets exist; GitHub-hosted runner only; no pull request text
+# is ever placed inside a run: step; versions and URLs go through env:.
+name: lint
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60  # generous on purpose: the runner speed is not measured yet; set it to about twice the first real run
+    env:
+      GITLEAKS_VERSION: "8.30.1"
+      # SHA-256 of gitleaks_8.30.1_linux_x64.tar.gz, copied from the release's published checksums file
+      # (gitleaks_8.30.1_checksums.txt) and from the release asset digest on 2026-11-09.
+      GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      # the scan runs first: ruff, mypy and bandit write cache folders into the tree and gitleaks dir would read them
+      - name: Install gitleaks (release binary, checksum checked)
+        run: |
+          curl --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfL -o gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum --check -
+          mkdir "${RUNNER_TEMP}/gitleaks"
+          tar -xzf gitleaks.tar.gz -C "${RUNNER_TEMP}/gitleaks" gitleaks
+          rm gitleaks.tar.gz
+
+      - name: Gitleaks on the tree and on the history (matches are redacted, no report file is written)
+        # --redact hides the matched value in the output; --ignore-gitleaks-allow makes inline allow comments count for nothing.
+        run: |
+          "${RUNNER_TEMP}/gitleaks/gitleaks" dir . --config .gitleaks.toml --redact --no-banner --ignore-gitleaks-allow
+          "${RUNNER_TEMP}/gitleaks/gitleaks" git . --config .gitleaks.toml --redact --no-banner --ignore-gitleaks-allow
+
+      - name: Install the pinned dev tools (hashes are checked)
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements-dev.txt
+
+      - name: Ruff (lint and format)
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Mypy (both platform branches of the typed code)
+        run: |
+          mypy --platform linux
+          mypy --platform win32
+
+      - name: Bandit (src, tools and scripts)
+        run: bandit -ll -r src tools scripts -c pyproject.toml
+
+      - name: Schema check
+        run: python scripts/check_schema.py
+
+      - name: Hardcoded-literal scan (patterns.txt minus exceptions.txt)
+        # Output lines look like path:line:matched-text; anything left after the exceptions fails the job.
+        run: |
+          set +e
+          git grep -n -o -I -E -f patterns.txt -- . > "${RUNNER_TEMP}/literals.txt"
+          status=$?
+          set -e
+          if [[ "$status" -gt 1 ]]; then echo "git grep failed (status $status)"; exit 1; fi
+          grep -v -E -f exceptions.txt "${RUNNER_TEMP}/literals.txt" > "${RUNNER_TEMP}/literals-left.txt" || true
+          if [[ -s "${RUNNER_TEMP}/literals-left.txt" ]]; then
+            echo "Hardcoded literals found (path:line:match):"
+            cat "${RUNNER_TEMP}/literals-left.txt"
+            exit 1
+          fi
+
+      - name: Canary guard (fails loudly if the scanner canary test is missing)
+        run: |
+          if ! grep -rq "def test_hygiene_scan_public" tests/; then
+            echo "MISSING: test_hygiene_scan_public (scanner canary test) is not in tests/. The scan cannot be trusted."
+            exit 1
+          fi
+
+      - name: Tests
+        env:
+          GITLEAKS_BIN: ${{ runner.temp }}/gitleaks/gitleaks
+          # DPLD_ = duplicate-proof-lead-desk: the prefix of this repository's own check switches
+          DPLD_REQUIRE_SCAN: "1"
+          # the demo_only folder must be in the checkout: without it most test files would skip and the run would look green
+          DPLD_REQUIRE_DEMO: "1"
+        run: python -m pytest -q

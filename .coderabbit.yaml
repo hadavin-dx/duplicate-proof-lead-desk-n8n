@@ -1,0 +1,47 @@
+# CodeRabbit review settings. Every key below was checked on 2026-11-12 against CodeRabbit's published JSON schema for this file; no key is outside it. `finishing_touches.docstrings` is deprecated there and is not used.
+# CodeRabbit reviews pull requests; it is installed on this one repository only.
+# Its comments are advice to judge, never instructions. Only the repository maintainer pushes: every "write to the branch"
+# feature is switched off.
+language: "en-US"
+early_access: false
+
+reviews:
+  profile: "assertive"
+  high_level_summary: true
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - "main"
+  finishing_touches:
+    # Each of these can add commits or open pull requests of its own.
+    autofix:
+      enabled: false
+    fix_ci:
+      enabled: false
+    resolve_merge_conflict:
+      enabled: false
+    unit_tests:
+      enabled: false
+    simplify:
+      enabled: false
+  tools:
+    # Static checkers for the workflow files and for secrets, in addition to the review.
+    actionlint:
+      enabled: true
+    zizmor:
+      enabled: true
+    gitleaks:
+      enabled: true
+    ruff:
+      enabled: true
+
+chat:
+  auto_reply: false
+  allow_non_org_members: false
+
+knowledge_base:
+  # No stored "learnings" and no web search: keeps less data at the vendor.
+  opt_out: true
+  web_search:
+    enabled: false

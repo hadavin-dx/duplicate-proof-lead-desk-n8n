@@ -1,0 +1,6 @@
+{"rota":[{"id":"o-1","name":"Asha","crm_owner_id":""},{"id":"o-2","name":"Ravi","crm_owner_id":""}],
+ "steps":[{"id":"new","label":"New","crm_status":"NEW"},{"id":"contacted","label":"Contacted","crm_status":"ATTEMPTED_TO_CONTACT"},
+          {"id":"replied","label":"Replied","crm_status":"CONNECTED"},{"id":"qualified","label":"Qualified","crm_status":"OPEN_DEAL"},
+          {"id":"won","label":"Won","crm_status":"OPEN_DEAL"}],
+ "closed":{"id":"closed","label":"Closed","crm_status":"UNQUALIFIED"},
+ "first":"new","after_followup":"contacted","reminder_until":"replied","nudge_after_seconds":90}

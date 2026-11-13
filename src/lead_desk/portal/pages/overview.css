@@ -1,0 +1,123 @@
+/* Overview page. Tokens, spacing and radius come from app.css only. */
+.ov { display: grid; gap: var(--s5); align-content: start; }
+.ov-kpis { display: grid; gap: var(--s4); grid-template-columns: repeat(auto-fit, minmax(176px, 1fr)); }
+.ov-kpis .kpi { padding: var(--s5); gap: var(--s2); }
+.ov-kpis .kpi-value { font-size: 30px; }
+.ov-kpis .kpi-caption a { font-weight: 600; text-decoration: none; }
+.ov-kpis .kpi-caption a:hover { text-decoration: underline; }
+.ov-col { display: grid; gap: var(--s4); align-content: start; }
+
+/* reconcile */
+.ov-eq { display: flex; align-items: center; gap: var(--s4); padding: var(--s3) var(--s4); border-radius: 12px; background: linear-gradient(135deg, var(--accent-wash), var(--violet-wash)); }
+.ov-eqnum { font-size: 32px; font-weight: 700; letter-spacing: -0.02em; line-height: 1; color: var(--accent); }
+.ov-eqtext { display: grid; gap: 0; }
+.ov-refused { font-size: var(--t-sm); color: var(--ink-3); padding-top: var(--s3); border-top: 1px solid var(--border-soft); }
+.ov-refused b { color: var(--ink-2); }
+.card .note .ico { width: 18px; height: 18px; flex: none; margin-top: var(--s1); }
+.card .splitbar svg { height: 16px; }
+
+/* doors */
+.ov-sources > li { font-size: var(--t-sm); padding: var(--s2) 0; }
+
+/* activity */
+.ov-chart { display: grid; grid-template-columns: 28px minmax(0, 1fr); grid-template-rows: 80px auto; gap: var(--s1) var(--s2); }
+.ov-y { display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; font-size: var(--t-xs); color: var(--ink-3); line-height: 1; }
+.ov-bars { position: relative; display: flex; align-items: flex-end; gap: 4px; height: 80px; border-bottom: 1px solid var(--border); background-image: linear-gradient(to bottom, var(--border-soft) 1px, transparent 1px); background-size: 100% 33.34%; background-repeat: repeat-y; }
+.ov-bar { position: relative; flex: 1; min-width: 6px; max-width: 64px; border-radius: 8px 8px 0 0; background: var(--info-solid); opacity: 0.9; }
+.ov-bar:hover { opacity: 1; background: var(--accent); }
+.ov-bar::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%); padding: var(--s1) var(--s2); border-radius: var(--r-ctl); background: var(--ink); color: var(--bg); font-size: var(--t-xs); white-space: nowrap; pointer-events: none; opacity: 0; z-index: 5; }
+/* the last bars anchor their tip to the right edge, so the hidden tip never widens the page */
+.ov-bar:nth-last-child(-n+6)::after { left: auto; right: 0; transform: none; }
+.ov-bar:hover::after { opacity: 1; }
+.ov-h0 { height: 2px; background: var(--border); opacity: 1; }
+.ov-h1 { height: 5%; } .ov-h2 { height: 10%; } .ov-h3 { height: 15%; } .ov-h4 { height: 20%; } .ov-h5 { height: 25%; }
+.ov-h6 { height: 30%; } .ov-h7 { height: 35%; } .ov-h8 { height: 40%; } .ov-h9 { height: 45%; } .ov-h10 { height: 50%; }
+.ov-h11 { height: 55%; } .ov-h12 { height: 60%; } .ov-h13 { height: 65%; } .ov-h14 { height: 70%; } .ov-h15 { height: 75%; }
+.ov-h16 { height: 80%; } .ov-h17 { height: 85%; } .ov-h18 { height: 90%; } .ov-h19 { height: 95%; } .ov-h20 { height: 100%; }
+.ov-axis { grid-column: 2; display: flex; justify-content: space-between; font-size: var(--t-xs); color: var(--ink-3); }
+
+/* live feed */
+.ov-feed > li { display: grid; grid-template-columns: 96px 32px minmax(0, 1fr) 100px 208px; gap: var(--s4); align-items: center; padding: var(--s3) 0; }
+.ov-when { font-size: var(--t-sm); color: var(--ink-3); white-space: nowrap; }
+.ov-ico { width: 32px; height: 32px; border-radius: var(--r-pill); display: grid; place-items: center; background: var(--neutral-bg); color: var(--neutral-fg); }
+.ov-ico .ico { width: 16px; height: 16px; }
+.ov-ico-ok { background: var(--ok-bg); color: var(--ok-fg); }
+.ov-ico-warn { background: var(--warn-bg); color: var(--warn-fg); }
+.ov-ico-bad { background: var(--bad-bg); color: var(--bad-fg); }
+.ov-ico-info { background: var(--info-bg); color: var(--info-fg); }
+.ov-ico-pending { background: var(--pending-bg); color: var(--pending-fg); }
+.ov-ico-hot { background: var(--hot-bg); color: var(--hot-fg); }
+.ov-ico-teal { background: var(--teal-bg); color: var(--teal-fg); }
+.ov-text { font-weight: 500; overflow-wrap: anywhere; }
+.ov-source { font-size: var(--t-sm); color: var(--ink-2); overflow-wrap: anywhere; }
+.ov-pill { justify-self: end; }
+
+@media (max-width: 1100px) { .ov-feed > li { grid-template-columns: 72px 32px minmax(0, 1fr) auto; } .ov-source { display: none; } }
+
+/* tiles, donut and legend */
+.ov .grid { align-items: stretch; }
+.ov .grid > div { display: grid; }
+.ov .grid > div > .card { height: 100%; align-content: start; }
+.ov-kpis .kpi-label { min-height: 20px; }
+@media (max-width: 1500px) { .ov-kpis .kpi-label { min-height: 40px; } }
+.ov-chart { grid-template-columns: 32px minmax(0, 1fr); }
+.ov-axis { gap: var(--s1); }
+.donut { display: grid; grid-template-columns: 148px minmax(0, 1fr); gap: var(--s5); align-items: center; }
+.donut-ring { position: relative; width: 148px; height: 148px; }
+.donut-svg { display: block; width: 148px; height: 148px; }
+.arc-track { stroke: var(--surface-3); }
+.arc-ok { stroke: var(--ok-solid); } .arc-warn { stroke: var(--warn-solid); } .arc-bad { stroke: var(--bad-solid); }
+.arc-hot { stroke: var(--hot-solid); } .arc-teal { stroke: var(--teal-solid); } .arc-info { stroke: var(--info-solid); } .arc-pending { stroke: var(--pending-solid); } .arc-neutral { stroke: var(--neutral-solid); }
+.donut-mid { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 0; }
+.donut-mid b { font-size: var(--t-xl); font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
+.donut-mid span { font-size: var(--t-xs); color: var(--ink-2); }
+.legend-col { display: grid; gap: var(--s2); max-width: 300px; }
+.legend-col li { display: grid; grid-template-columns: 10px minmax(0, 1fr) 40px 44px; align-items: center; gap: var(--s2); width: 100%; }
+.legend-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.legend-n { text-align: right; }
+.legend-pct { text-align: right; }
+.ov-foot { font-size: var(--t-sm); }
+/* below 1100px the ring sits above its legend, so the legend keeps its full width */
+@media (max-width: 1100px) { .donut { grid-template-columns: minmax(0, 1fr); justify-items: center; gap: var(--s4); } .donut .legend-col { justify-self: stretch; } }
+
+/* the five tiles stay on one row at 1280 px: a little less padding, the label may take two lines */
+@media (max-width: 1500px) { .ov-kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--s3); } .ov-kpis .kpi { padding: var(--s4); } .ov-kpis .kpi-label { font-size: var(--t-xs); } }
+
+/* the middle of the page is one grid of four cards in two rows (outcomes 5 | sources 7, then follow-ups 7 | activity 5): it holds with or without
+   the extension, whose cross-check is a full-width strip above the grid. Cards in a row are as high as the higher one and keep their content at the top. */
+.ov .grid.ov-mid { align-items: stretch; }
+.ov-mid > .span-5 { grid-column: span 5; } .ov-mid > .span-7 { grid-column: span 7; }
+.ov-mid > div { display: grid; }
+.ov .grid.ov-mid > div > .card { height: 100%; align-content: start; }
+.ov-mid .donut { grid-template-columns: 148px minmax(0, 1fr); justify-items: start; }
+.ov-mid .legend-col { max-width: none; }
+.ov-mid .donut .legend-col { justify-self: stretch; }
+.ov-mid .legend-col li { grid-template-columns: 10px minmax(0, 1fr) 56px 56px; padding: var(--s1) 0; border-bottom: 1px solid var(--border-faint); }
+.ov-mid .legend-col li:last-child { border-bottom: 0; }
+@media (max-width: 1100px) { .ov-mid > .span-5, .ov-mid > .span-7 { grid-column: span 12; } }
+@media (max-width: 1500px) { .card .splitbar .legend { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s2) var(--s4); } }
+
+/* activity: about 20 wide bars, and a time axis whose labels sit at their own tick marks (one equal column per minute, "now" at the right end) */
+.ov-bars { gap: var(--s1); }
+.ov-bar { max-width: 72px; }
+.ov-axis { position: relative; display: grid; gap: 0; padding-bottom: var(--s1); }
+.ov-axis-1 { grid-template-columns: repeat(1, minmax(0, 1fr)); } .ov-axis-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ov-axis-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } .ov-axis-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.ov-axis-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.ov-tick { display: block; white-space: nowrap; }
+.ov-tick::before { content: ""; display: block; width: 1px; height: var(--s1); margin-bottom: var(--s1); background: var(--border-strong); }
+.ov-tick-end { position: absolute; right: 0; top: 0; text-align: right; }
+.ov-tick-end::before { margin-left: auto; }
+
+.ov-legend-note { font-size: var(--t-sm); }
+.ov-chartbox { display: grid; gap: var(--s2); }
+
+/* the tile row fits the tiles present: four tiles fill the row too */
+.ov .ov-kpis.ov-kpis-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.ov .ov-kpis.ov-kpis-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+/* cards of one row: content spread evenly inside the taller height, so no card ends in an empty band */
+.ov .grid.ov-mid > div > .card { align-content: start; }
+
+
+/* a phone: two tiles per row (five minmax(0,1fr) columns cannot hold their labels), the labels may wrap, the donut legend goes under the ring */
+@media (max-width: 860px) { .ov { grid-template-columns: minmax(0, 1fr); } .ov .ov-kpis.ov-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ov-kpis .kpi-label { white-space: normal; } .ov-mid .donut { grid-template-columns: minmax(0, 1fr); justify-items: center; } }

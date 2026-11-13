@@ -65,6 +65,8 @@ You need Linux or Windows (macOS was not tried), Python 3.12 or newer and git, a
     curl http://127.0.0.1:8766/fake/outbox         # "count": 1  (one email, not two)
     bash scripts/reset.sh                          # stops what start_all started and DELETES the desk's records and the logs (only inside ./data)
 
+Run both scripts with `bash`, as above: they use bash's `[[ ]]` tests, so `sh scripts/start_all.sh` and `sh scripts/reset.sh` stop with "run this script with bash" (exit 2) in any shell where `[[` does not run, for example where `sh` is dash (Debian and Ubuntu). A shell that does run `[[` (busybox sh, zsh) goes on.
+
 **Windows PowerShell**
 
     py -3 -m venv .venv                        # or python -m venv .venv; `py -3` avoids the Microsoft Store stub

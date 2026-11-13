@@ -1,0 +1,26 @@
+/* Data and AI page. Tokens from app.css only. */
+.dt { display: grid; gap: var(--s4); align-content: start; }
+.dt-cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s4); align-items: start; }
+.dt-payload { margin-bottom: var(--s3); }
+.dt-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s4); }
+.dt-group { display: grid; gap: var(--s3); align-content: start; padding: var(--s4); border: 1px solid var(--border-soft); border-radius: var(--r-ctl); background: var(--surface-2); }
+.dt-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--s2); }
+.dt-chip { display: inline-flex; align-items: center; gap: var(--s2); padding: var(--s2) var(--s3); border-radius: var(--r-pill); background: var(--neutral-bg); color: var(--ink); font-weight: 600; font-size: var(--t-base); }
+.dt-chip .ico { width: 14px; height: 14px; }
+.dt-chip-never { background: var(--surface); color: var(--ink-2); border: 1px solid var(--border); font-weight: 500; border-style: dashed; }
+.dt-mode { display: flex; align-items: flex-start; gap: var(--s3); padding-top: var(--s4); border-top: 1px solid var(--border-soft); color: var(--ink-2); font-size: var(--t-base); }
+.dt-mode .ico { width: 18px; height: 18px; flex: none; color: var(--ink-3); }
+.dt-foot { font-size: var(--t-sm); padding-top: var(--s3); }
+.dt-acc-list > li { gap: var(--s4); }
+.dt-acc-ico { width: 28px; height: 28px; border-radius: var(--r-pill); display: grid; place-items: center; background: var(--neutral-bg); color: var(--neutral-fg); flex: none; }
+.dt-acc-ico .ico { width: 14px; height: 14px; }
+.dt-acc-off .dt-acc-ico { background: var(--warn-bg); color: var(--warn-fg); }
+.dt-acc-text { flex: 1; min-width: 0; }
+.card .table-wrap { box-shadow: none; }
+@media (max-width: 860px) { .dt-two { grid-template-columns: minmax(0, 1fr); } }
+
+/* the two boxes keep the height of their own content (no empty band under the chips) */
+.dt-two { align-items: stretch; }
+.dt-two + .dt-foot { padding-top: 0; }
+/* at 1200 and below the two boxes stack, so neither is half empty beside the other */
+@media (max-width: 1200px) { .dt-two { grid-template-columns: minmax(0, 1fr); } }

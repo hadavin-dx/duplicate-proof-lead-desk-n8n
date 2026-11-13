@@ -1,0 +1,21 @@
+/* Request log page. Tokens from app.css only. */
+.log-note .ico { width: 18px; height: 18px; flex: none; color: var(--ink-3); }
+.log-out { display: grid; gap: var(--s2); }
+.log-req { display: inline-flex; align-items: center; gap: var(--s2); }
+.log-req .mono { color: var(--ink-2); }
+.icon-btn-sm { width: 28px; height: 28px; border-color: transparent; background: transparent; opacity: 0; transition: opacity var(--dur), background var(--dur); }
+.icon-btn-sm .ico { width: 14px; height: 14px; }
+.table tbody tr:hover .icon-btn-sm, .icon-btn-sm:focus-visible { opacity: 1; }
+.table tbody tr:hover { background: var(--surface-2); }
+.log-when { display: inline-flex; align-items: baseline; gap: var(--s2); white-space: nowrap; }
+.log-when .faint { font-size: var(--t-xs); }
+
+/* short cells never break in the middle of a word group; the request number column keeps room for the repeat-group line */
+.log-out .table td:nth-child(3), .log-out .table td:nth-child(5) { white-space: nowrap; }
+.log-out .table td:nth-child(2) { min-width: 200px; }
+/* tighter cells at 1280 so the group line and the repeat note do not break into many lines */
+.log-grp { white-space: nowrap; }
+.log-out .table td:nth-child(2) { min-width: 0; max-width: 240px; }
+@media (max-width: 1500px) { .log-out .table th, .log-out .table td { padding-left: var(--s3); padding-right: var(--s3); } .log-out .table td:last-child { min-width: 150px; } }
+
+.chip-id { white-space: nowrap; }

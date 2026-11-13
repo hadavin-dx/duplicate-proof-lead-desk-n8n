@@ -1,0 +1,6 @@
+# Extra tools for the coverage run of the SonarQube job (.github/workflows/sonar.yml) only. Linux, Python 3.12.
+# Installed together with requirements-dev.txt in ONE pip call (-r requirements-dev.txt -r requirements-coverage.txt, --require-hashes); the lint job and the Windows lock never see it.
+# The lock is built against requirements-dev.txt (-c), so pytest and its helpers keep the versions of that lock.
+# Regenerate with uv 0.11.32 (command in the header of requirements-coverage.txt), and regenerate requirements-coverage.txt whenever
+# requirements-dev.txt changes (if a package is pinned to two versions in the two files, the pip call in sonar.yml stops with "conflicting dependencies").
+pytest-cov
