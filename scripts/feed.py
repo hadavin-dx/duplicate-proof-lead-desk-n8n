@@ -4,7 +4,8 @@ Run from the repository root:  PYTHONPATH=src python scripts/feed.py --source fo
 Each lead in demo_only/canned_leads.json becomes the envelope {"source", "source_ref": "canned-<i>", "payload"}, where
 <i> is the position in the file starting at 1. Sending the same --index twice sends the same request id twice
 (a replay).
-The desk address comes from the desk configuration (DESK_BIND, DESK_PORT), not from this file.
+The desk address comes from the desk configuration (DESK_BIND, DESK_PORT), not from this file and not from the command
+line: there is no option to point the request anywhere else.
 """
 
 from __future__ import annotations
@@ -63,14 +64,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--source", choices=SOURCES, required=True)
     ap.add_argument("--index", type=int, help="position in canned_leads.json, starting at 1")
     ap.add_argument("--all", action="store_true", help="send every canned lead once")
-    ap.add_argument("--url", default=f"{desk_origin(target_host(cfg.bind), cfg.port)}/leads")
     args = ap.parse_args(argv)
     if args.all == (args.index is not None):
         ap.error("give exactly one of --index or --all")
+    url = f"{desk_origin(target_host(cfg.bind), cfg.port)}/leads"  # from the configuration only
     leads = json.loads(CANNED.read_text(encoding="utf-8"))
     indexes = range(1, len(leads) + 1) if args.all else [args.index]
     for i in indexes:
-        status, body = post(args.url, build_envelope(args.source, i, leads), cfg.send_timeout_seconds)
+        status, body = post(url, build_envelope(args.source, i, leads), cfg.send_timeout_seconds)
         print(f"canned-{i} {args.source} -> {status} {body}")
     return 0
 
