@@ -22,6 +22,7 @@ import socket
 import ssl
 import urllib.error
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -106,6 +107,26 @@ PASSES_THROUGH = [
 ]
 
 
+DEMO_DIR = "demo_only"
+DEMO_GONE = not (REPO / DEMO_DIR).is_dir()  # computed once; True only in a client copy with the whole folder deleted
+
+
+def _present(rows: list[tuple[object, ...]], demo_gone: bool) -> list[object]:
+    """The rows as pytest params. Only a row about a file under demo_only/ can be skipped, and only when that whole
+    folder was deleted (a client copy, demo_gone). A product row, a typo in a path, or one demo file missing while the
+    folder is there is not skipped: it runs and fails with FileNotFoundError."""
+    return [
+        pytest.param(
+            *r,
+            id=_ids([r])[0],
+            marks=pytest.mark.skipif(
+                demo_gone and str(r[0]).startswith(DEMO_DIR + "/"), reason=f"{r[0]}: {DEMO_DIR}/ was removed"
+            ),
+        )
+        for r in rows
+    ]
+
+
 def _ids(rows: list[tuple[object, ...]]) -> list[str]:
     return [f"{r[0]}::{r[1]}" + "".join(f"[{x}]" for x in r[2:4] if isinstance(x, int)) for r in rows]
 
@@ -149,13 +170,13 @@ def _classes(handler: ast.ExceptHandler, path: str) -> list[type[BaseException]]
     return found
 
 
-@pytest.mark.parametrize(("path", "function"), list(HANDLERS), ids=_ids(list(HANDLERS)))
+@pytest.mark.parametrize(("path", "function"), _present(list(HANDLERS), DEMO_GONE))
 def test_handler_order_is_exactly_as_listed(path: str, function: str) -> None:
     seen = [[ast.unparse(h.type) if h.type else "" for h in t.handlers] for t in _tries(path, function)]
     assert seen == HANDLERS[(path, function)]
 
 
-@pytest.mark.parametrize(("path", "function"), list(HANDLERS), ids=_ids(list(HANDLERS)))
+@pytest.mark.parametrize(("path", "function"), _present(list(HANDLERS), DEMO_GONE))
 def test_no_class_is_named_twice_or_hidden_by_an_earlier_handler(path: str, function: str) -> None:
     for t in _tries(path, function):
         earlier: list[type[BaseException]] = []
@@ -170,7 +191,7 @@ def test_no_class_is_named_twice_or_hidden_by_an_earlier_handler(path: str, func
             earlier += mine
 
 
-@pytest.mark.parametrize(("path", "function", "t", "h"), RERAISE_BEFORE_EXCEPTION, ids=_ids(RERAISE_BEFORE_EXCEPTION))
+@pytest.mark.parametrize(("path", "function", "t", "h"), _present(RERAISE_BEFORE_EXCEPTION, DEMO_GONE))
 def test_memory_and_send_errors_are_handed_back_before_except_exception(
     path: str, function: str, t: int, h: int
 ) -> None:
@@ -195,7 +216,7 @@ def test_the_two_senders_have_exactly_the_six_bare_re_raise_handlers() -> None:
     assert sorted(found) == sorted(listed)
 
 
-@pytest.mark.parametrize(("path", "function", "t", "h", "must_catch"), STILL_CAUGHT, ids=_ids(STILL_CAUGHT))
+@pytest.mark.parametrize(("path", "function", "t", "h", "must_catch"), _present(STILL_CAUGHT, DEMO_GONE))
 def test_shortened_clause_still_catches_the_names_it_lost(
     path: str, function: str, t: int, h: int, must_catch: list[type[BaseException]]
 ) -> None:
@@ -214,3 +235,46 @@ def test_handed_on_error_is_caught_by_no_handler_of_its_try(
 ) -> None:
     for handler in _tries(path, function)[t].handlers:
         assert not issubclass(error, tuple(_classes(handler, path))), f"{path}:{handler.lineno} catches {error}"
+
+
+# The guard above is what keeps the no-demo copy honest, so it is pinned here, not only measured once by hand.
+_GUARDED = (
+    test_handler_order_is_exactly_as_listed,
+    test_no_class_is_named_twice_or_hidden_by_an_earlier_handler,
+    test_memory_and_send_errors_are_handed_back_before_except_exception,
+    test_shortened_clause_still_catches_the_names_it_lost,
+)
+
+
+def _skip_condition(param: Any) -> object:
+    (mark,) = [m for m in param.marks if m.name == "skipif"]
+    return mark.args[0]
+
+
+@pytest.mark.parametrize("demo_gone", [True, False])
+def test_present_skips_only_demo_rows_and_only_when_the_folder_is_gone(demo_gone: bool) -> None:
+    rows: list[tuple[object, ...]] = [
+        ("src/lead_desk/smtp_outbox.py", "SmtpOutbox.send"),
+        ("load_tools/anything.py", "f"),
+        ("demo_only/fake_imap.py", "FakeImap._serve"),
+        ("demo_only/sub/x.py", "g"),
+        ("demo_onlyx/y.py", "h"),  # not inside the folder: its name only starts the same way
+    ]
+    params = _present(rows, demo_gone)
+    assert [p.values for p in params] == rows  # type: ignore[attr-defined]
+    got = [_skip_condition(p) for p in params]
+    assert got == [False, False, demo_gone, demo_gone, False]
+    assert all(type(c) is bool for c in got)
+
+
+def test_demo_gone_is_the_state_of_the_folder_and_every_guarded_test_uses_it() -> None:
+    assert DEMO_GONE is (not (REPO / DEMO_DIR).exists())  # a different probe than _present's own: they must agree
+    seen = 0
+    for fn in _GUARDED:
+        (mark,) = [m for m in fn.pytestmark if m.name == "parametrize"]  # type: ignore[attr-defined]
+        for param in mark.args[1]:
+            path = str(param.values[0])
+            assert _skip_condition(param) is (DEMO_GONE and path.startswith("demo_only/")), path
+            seen += path.startswith("demo_only/")
+    assert seen == 6  # the six demo rows are there (else this proves nothing)
+    assert any(not str(r[0]).startswith("demo_only/") for r in [*HANDLERS, *RERAISE_BEFORE_EXCEPTION, *STILL_CAUGHT])
