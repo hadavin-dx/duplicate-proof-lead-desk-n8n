@@ -25,6 +25,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from tools.pathconfine import allowed_roots, confine_iter  # PROBE ONLY, DO NOT MERGE
+
 FALLBACK_RETRY_VALUES = (
     0.1,
     1.0,
@@ -346,6 +348,17 @@ def machine_facts() -> dict[str, Any]:
 def run(
     base_url: str, scenario: str, log: Path, facts_path: Path, workers: int, threads: int, seed: int, prefix: str
 ) -> dict[str, Any]:
+    log = confine_iter(log, what="--log")  # PROBE writes2: the HELPER on this write (iteration table, as in v3)
+    try:  # PROBE writes2 shape INLINE on a write: realpath, check against the allowed folders, refuse
+        real_facts = os.path.realpath(facts_path)
+        inside = any(
+            os.path.commonpath([os.path.normcase(real_facts), os.path.normcase(root)]) == os.path.normcase(root)
+            for root in allowed_roots()
+        )
+    except (OSError, ValueError):  # a NUL or a loop in the path, or another drive
+        inside = False
+    if not inside:
+        raise ValueError("--facts: path is outside the allowed folders")
     facts = machine_facts()
     t0 = time.time() + START_LEAD_SECONDS  # wall-clock: calendar stamp
     schedule = build_schedule(scenario, t0, prefix, seed)
@@ -363,7 +376,7 @@ def run(
         seed=seed,
         qualifier=os.environ.get("DESK_QUALIFIER", ""),  # lets the checker know the AI step was live
     )
-    facts_path.write_text(json.dumps(facts, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    Path(real_facts).write_text(json.dumps(facts, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     ctx = multiprocessing.get_context("spawn")
     with ctx.Pool(workers) as pool:
         pool.map(_worker, jobs, chunksize=1)

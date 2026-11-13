@@ -17,6 +17,22 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+from tools.pathconfine import (
+    PathRefused,
+    allowed_roots,
+    confine,
+    confine_existing,
+    confine_existing_fixed,
+    confine_existing_ix,
+)
+
+# PROBE ONLY, DO NOT MERGE. Which flagged site has which shape is in PROBE-AB-V3-NOTE.md.
+# PROBE shape NAME-ONLY: the drain marker is found by NAME in this folder
+DRAIN_DIR = str(Path(__file__).resolve().parent)
+# PROBE positive control: the only names the control function reads (compared by equality, then used)
+CONTROL_NAMES = ("README.md", "catcher.py")
+
+
 # ---- config block (the only place for numbers and words) ----
 FIRST_N = 10  # offending ids listed per check
 DEFAULT_MODEL_CALL_BOUND = 3  # check 5: most model calls allowed for one lead
@@ -58,6 +74,10 @@ class InputError(Exception):
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    try:  # PROBE shape SPLIT: helper for an existing file only (no new-name branch), environment roots
+        path = confine_existing(path, what="log file")
+    except PathRefused as e:
+        raise InputError(str(e)) from e
     rows: list[dict[str, Any]] = []
     try:
         text = path.read_text(encoding="utf-8")
@@ -78,8 +98,18 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
 
 def read_crm(path: Path) -> list[dict[str, Any]]:
     """Accepts the fakes server reply {"count", "rows": [...]} or a bare list of rows (each has lead_id)."""
+    try:  # PROBE shape INLINE: realpath, check against the allowed folders, refuse, then read the real path
+        real = os.path.realpath(path)
+        inside = any(
+            os.path.commonpath([os.path.normcase(real), os.path.normcase(root)]) == os.path.normcase(root)
+            for root in allowed_roots()
+        )
+    except (OSError, ValueError):  # a NUL or a loop in the path, or another drive
+        inside = False
+    if not inside:
+        raise InputError("--crm: path is outside the allowed folders")
     try:
-        obj = json.loads(path.read_text(encoding="utf-8"))
+        obj = json.loads(Path(real).read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
         raise InputError(f"cannot read CRM dump {path.name}: {type(e).__name__}") from e
     rows = obj.get("rows") if isinstance(obj, dict) else obj
@@ -593,6 +623,10 @@ def render_table(result: Mapping[str, Any]) -> str:
 
 
 def _intended(path: Path) -> int:
+    try:  # PROBE shape COMBINED: the helper that also has the new-name branch
+        path = confine(path, what="--facts")
+    except PathRefused as e:
+        raise InputError(str(e)) from e
     try:
         return int(json.loads(path.read_text(encoding="utf-8"))["intended_requests"])
     except (OSError, ValueError, KeyError, TypeError) as e:
@@ -601,6 +635,10 @@ def _intended(path: Path) -> int:
 
 def _facts_say_live(path: Path) -> bool:
     """True when the driver's facts file records that the run's AI step was the live model (see load_driver.run)."""
+    try:  # PROBE shape SPLIT-FIXED: existing file only, allowed folders WITHOUT the environment
+        path = confine_existing_fixed(path, what="--facts")
+    except PathRefused:
+        return True  # fail closed: a refused path counts as "live" (the model-required check on); _intended refuses it
     try:
         return bool(json.loads(path.read_text(encoding="utf-8")).get("qualifier") == "live_claude")
     except (OSError, ValueError, AttributeError):
@@ -610,12 +648,41 @@ def _facts_say_live(path: Path) -> bool:
 def _drain_marker(path: Path | None) -> float | None:
     if path is None:
         return None
+    # PROBE shape NAME-ONLY: only the name counts; the folder is the constant DRAIN_DIR
+    name = os.path.basename(str(path))
+    if name in ("", ".", ".."):
+        raise InputError("--drain: not a file name")
     try:
-        obj = json.loads(path.read_text(encoding="utf-8"))
+        obj = json.loads(Path(os.path.join(DRAIN_DIR, name)).read_text(encoding="utf-8"))
         value = obj.get("drained_ts")
     except (OSError, ValueError, AttributeError) as e:
         raise InputError(f"cannot read drain marker {path.name}: {type(e).__name__}") from e
     return None if value is None else float(value)
+
+
+def _probe_index_read(path: Path) -> int:
+    """PROBE ONLY: a second read of a log through the INDEX helper (a twin of read_jsonl, same file, same source)."""
+    try:  # PROBE shape INDEX: as read_jsonl, but the helper picks the folder by index and returns no pair
+        path = confine_existing_ix(path, what="log file")
+    except PathRefused as e:
+        raise InputError(str(e)) from e
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        raise InputError(f"cannot read {path.name}: {type(e).__name__}") from e
+    return len(text)
+
+
+def _probe_control(path: Path) -> int | None:
+    """PROBE ONLY, positive control: the name is compared by equality with constants, then used; any other name is
+    ignored (None). The only difference from an unguarded read is that comparison."""
+    name = str(path)
+    if name != CONTROL_NAMES[0] and name != CONTROL_NAMES[1]:
+        return None
+    try:
+        return len(Path(DRAIN_DIR, name).read_text(encoding="utf-8"))
+    except OSError:
+        return None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -659,6 +726,8 @@ def main(argv: list[str] | None = None) -> int:
         a.model_required = os.environ.get("DESK_QUALIFIER") == "live_claude" or _facts_say_live(facts_path)
     try:
         intended = _intended(facts_path)
+        _probe_index_read(a.catcher)  # PROBE ONLY: the index helper on the same file as read_jsonl(a.catcher) below
+        _probe_control(a.model_log)  # PROBE ONLY: positive control
         result = run_checks(
             read_jsonl(a.requests),
             read_book(a.book),

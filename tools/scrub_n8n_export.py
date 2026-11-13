@@ -46,8 +46,9 @@ import copy
 import json
 import re
 import sys
-from pathlib import Path
 from typing import Any
+
+from tools.pathconfine import PathRefused, confine, confine_existing  # PROBE ONLY, DO NOT MERGE
 
 TOP = ("name", "active", "nodes", "connections")
 SETTINGS = ("executionOrder",)  # add a key here only when the demo needs that setting
@@ -175,8 +176,18 @@ def main(argv: list[str]) -> int:
     except ValueError:
         print("usage: python -m tools.scrub_n8n_export in.json out.json")
         return 2
-    wf = json.loads(Path(src).read_text(encoding="utf-8"))
-    Path(dst).write_text(json.dumps(scrub(wf), indent=2, ensure_ascii=False) + chr(10), encoding="utf-8")
+    try:  # PROBE replicate of shape SPLIT (as check_invariants.read_jsonl): existing file only, environment roots
+        src_path = confine_existing(src, what="in.json")
+    except PathRefused as e:
+        print(f"refused: {e}")
+        return 2
+    wf = json.loads(src_path.read_text(encoding="utf-8"))
+    try:  # PROBE writes2 shape HELPER on a WRITE (the combined helper with the dict table), environment roots
+        out_path = confine(dst, what="out.json")
+    except PathRefused as e:
+        print(f"refused: {e}")
+        return 2
+    out_path.write_text(json.dumps(scrub(wf), indent=2, ensure_ascii=False) + chr(10), encoding="utf-8")
     return 0
 
 
