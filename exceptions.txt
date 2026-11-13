@@ -29,3 +29,6 @@
 ^README\.md:[0-9]+:hadavin\.com[^A-Za-z0-9-]?$
 ^SECURITY\.md:[0-9]+:sales@hadavin\.com$
 ^(sonar-project\.properties|\.gitleaks\.toml):[0-9]+:projectKey=hadavin-dx_[d]uplicate-proof-lead-desk-n8n$
+^requirements-semgrep\.txt:[0-9]+:[0-9a-f]{64}$
+^[^:]+:[0-9]+:requirements-semgrep\.in[^A-Za-z0-9_-]?$
+^requirements-semgrep\.txt:[0-9]+:(opentelemetry-[a-z-]+)(==[0-9]+)?$

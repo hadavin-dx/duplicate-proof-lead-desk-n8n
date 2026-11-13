@@ -1,0 +1,81 @@
+# Semgrep open-source CLI (engine licence LGPL-2.1). No account, no token, no repository secret, metrics off.
+# Rules come from the public Semgrep registry (p/python, p/javascript). Their licence is the Semgrep Rules License v1.0:
+# own internal use only, not redistributed (see the legal page on the Semgrep website; that text was not fetched or read for this
+# check, so these terms are not checked against it). The job log of a public repository is public: it prints rule ids and messages (docs/tests.md, "Semgrep").
+# Same house rules as lint.yml: Actions pinned to a full SHA, read-only permissions, GitHub-hosted runner,
+# nothing from pull request text inside a run: step, installs checked by hash.
+name: semgrep
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # one run per ref; a newer push to a pull request cancels the older run, and a push to main does not cancel a run that is already running on main (cancelling is off for pushes). GitHub may still replace a run of the same group that is only waiting to start (pending) with a newer one; that is from the GitHub documentation as remembered, NOT measured here. This is safe only while github.ref stays in the group name
+  group: semgrep-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  semgrep:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20  # a ceiling, not a measurement: the run time of the live run was not read for this comment; the install took 17 s on a fast link in one test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Semgrep (pinned version, hashes are checked)
+        # --only-binary=:all: and --no-deps: only ready-made wheels from the lockfile are installed; nothing is built from
+        # source (a build would fetch its build tools unchecked) and nothing outside the lockfile is pulled in.
+        run: "python -m pip install --require-hashes --only-binary=:all: --no-deps -r requirements-semgrep.txt"
+
+      - name: Check the install (a package missing from the lockfile must not look like a finding)
+        # --no-deps above means pip did not resolve anything: pip check reports a missing or conflicting package here,
+        # and semgrep --version shows the program starts at all.
+        run: |
+          python -m pip check
+          semgrep --version --disable-version-check
+
+      - name: Semgrep (fails on findings of severity ERROR)
+        # The rules are fetched live from the public registry at every run and cannot be pinned (there is no versioned pack,
+        # and copying the rules into this repository is not allowed by their licence). So this check can turn red or lose
+        # coverage with no change in this repository when the registry changes. Keep it OUT of the required checks.
+        # Exit codes (seen with this pinned Semgrep 1.185.0 on a made-up local rule, and with the registry blocked): 0 clean,
+        # 1 findings (--error), 2 registry or network failure or a scan path that does not exist, 7 a rule file that cannot be read.
+        # Status: first live run on GitHub (read from the job log by the project lead, not by the author of this comment):
+        # run 43403502735, 2026-11-13, head 15b8b15e: "Scanning 64 files tracked by git with 79 Code rules", "Ran 77 rules on 47 files: 0 findings", exit 0.
+        # A green job alone does NOT prove that rules ran: the log line "Ran N rules on M files" is the proof (docs/tests.md, "Semgrep"). tests/ and demo_only/ are not scanned.
+        # Network use: PyPI file hosts (lock file, hash-checked), the CPython download of setup-python (GitHub-hosted Python builds), and the Semgrep rule download service (host name ends in .dev) for the two packs.
+        # Only exit 2 is retried (3 tries); findings are never retried. If all 3 tries end in 2, the job fails: re-run it later,
+        # or check that src scripts load_tools tools n8n all exist (the message names the possible causes).
+        # --metrics=off: no usage data is sent. --disable-version-check: no call to the Semgrep website for a newer version.
+        # --strict: rule problems stop the run instead of being skipped; with --strict some files that cannot be parsed (for example one with an unclosed call bracket) end the run with exit 3, and without it the same files give exit 0 (made-up local test, 1.185.0); not every syntax error does this, for example `def f(:` alone gave exit 0 even with --strict.
+        # Findings print to the job log. To suppress one: docs/tests.md, "Semgrep".
+        env:
+          RETRY_PAUSE_SECONDS: "20"
+        run: |
+          # printed once, before the first try: the version and the pack names asked for (names only, no rule text); Semgrep's own
+          # summary below shows how many rules it really ran. An echo cannot change the exit code of the scan.
+          echo "semgrep $(semgrep --version --disable-version-check), packs: p/python p/javascript, severity ERROR, folders: src scripts load_tools tools n8n"
+          status=0
+          for attempt in 1 2 3; do
+            semgrep scan --metrics=off --disable-version-check --strict --error --severity ERROR --config p/python --config p/javascript src scripts load_tools tools n8n && status=0 || status=$?
+            if [[ "$status" -ne 2 ]]; then break; fi
+            echo "semgrep exit 2 (registry or network failure, bad configuration, or a scan path that does not exist), try ${attempt} of 3"
+            if [[ "$attempt" -lt 3 ]]; then sleep "${RETRY_PAUSE_SECONDS}"; fi
+          done
+          if [[ "$status" -eq 1 ]]; then
+            echo "findings above (exit 1): fix them, or suppress with # nosemgrep: <rule-id> <reason>, see docs/tests.md"
+          elif [[ "$status" -ne 0 ]]; then
+            echo "semgrep failed with exit ${status}: a tool or network error, NOT findings (see the log above and docs/tests.md, Semgrep)"
+          fi
+          exit "$status"
