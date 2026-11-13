@@ -1,0 +1,7 @@
+{
+  "name": "n8n-evidence",
+  "private": true,
+  "dependencies": {
+    "n8n": "2.46.6"
+  }
+}

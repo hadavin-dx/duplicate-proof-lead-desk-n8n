@@ -96,6 +96,11 @@ regexTarget = "match"
 regexes = ['''^[0-9a-f]{64}$''']
 paths = ['''^requirements-browser(-win)?\.txt$''']
 [[rules.allowlists]]
+condition = "AND"  # the SHA-256 lists and the pinned image digest of the n8n evidence folder, and the test that checks the gate-rule hash
+regexTarget = "match"
+regexes = ['''^[0-9a-f]{64}$''']
+paths = ['''(^|[/\\])demo_only/n8n_evidence/(SHA256SUMS|gate-rule\.sha256\.txt|harness/run_all\.py)$''', '''(^|[/\\])tests/test_n8n_evidence\.py$''']
+[[rules.allowlists]]
 condition = "AND"  # the hash lines of the Semgrep lock, in the root file of that name only (the scan runs from the root, so the path is relative; this relies on the `cwd=target` change in tests/test_hygiene.py, which makes the scan run from the repository root: without it the `^` never matches and the hygiene test fails): the whole line must be (spaces, then) `--hash=sha256:` and 64 hex characters, nothing in front (gitleaks hands over the line with the line break in front of it, so the `^` is followed by an optional one)
 regexTarget = "line"
 regexes = ['''^\n?[ \t]*--hash=sha256:[0-9a-f]{64}( \\)?\r?$''']

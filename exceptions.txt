@@ -27,6 +27,10 @@
 ^[^:]+:[0-9]+:https:/{2}github\.com/n8n-io/n8n/blob/master/LICENSE\.md$
 ^[^:]+:[0-9]+:(requirements-dev\.in|(start_all|reset|all)\.sh|log\.info\(|P\.page\(|counts\.info)[^A-Za-z0-9_-]?$
 ^README\.md:[0-9]+:hadavin\.com[^A-Za-z0-9-]?$
+^demo_only/n8n_evidence/package-lock\.json:[0-9]+:(https:/{2}[^ ]+|[A-Za-z0-9+/=_-]{40,}|i@izs\.me|(xata|socket)\.io/?)$
+^demo_only/n8n_evidence/(SHA256SUMS|gate-rule\.sha256\.txt):[0-9]+:([0-9a-f]{64}|(published_run/invalid|workflows)/[A-Za-z0-9_-]+)$
+^demo_only/n8n_evidence/harness/run_all\.py:[0-9]+:[0-9a-f]{64}$
+^tests/test_n8n_evidence\.py:[0-9]+:[0-9a-f]{64}$
 ^SECURITY\.md:[0-9]+:sales@hadavin\.com$
 ^(sonar-project\.properties|\.gitleaks\.toml):[0-9]+:projectKey=hadavin-dx_[d]uplicate-proof-lead-desk-n8n$
 ^requirements-semgrep\.txt:[0-9]+:[0-9a-f]{64}$

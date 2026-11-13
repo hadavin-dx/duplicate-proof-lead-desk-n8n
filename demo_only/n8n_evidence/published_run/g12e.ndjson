@@ -1,0 +1,5 @@
+{"run": 1, "email": "e3-burst-1-c3a918@example.com", "replies": {"200": 10}, "spread_ms": 2, "counts": {"crm": 1, "outbox": 1}, "db_status": "sent", "counts_after_35s": {"crm": 1, "outbox": 1}}
+{"run": 2, "email": "e3-burst-2-35e646@example.com", "replies": {"200": 10}, "spread_ms": 6, "counts": {"crm": 1, "outbox": 1}, "db_status": "sent", "counts_after_35s": {"crm": 1, "outbox": 1}}
+{"run": 3, "email": "e3-burst-3-e01bde@example.com", "replies": {"200": 10}, "spread_ms": 2, "counts": {"crm": 1, "outbox": 1}, "db_status": "sent", "counts_after_35s": {"crm": 1, "outbox": 1}}
+{"run": 4, "email": "e3-burst-4-9269df@example.com", "replies": {"200": 10}, "spread_ms": 6, "counts": {"crm": 1, "outbox": 1}, "db_status": "sent", "counts_after_35s": {"crm": 1, "outbox": 1}}
+{"run": 5, "email": "e3-burst-5-9185d3@example.com", "replies": {"200": 10}, "spread_ms": 1, "counts": {"crm": 1, "outbox": 1}, "db_status": "sent", "counts_after_35s": {"crm": 1, "outbox": 1}}

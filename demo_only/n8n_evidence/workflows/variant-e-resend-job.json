@@ -1,0 +1,186 @@
+{
+  "name": "wp0b3-sweeper",
+  "active": false,
+  "connections": {
+    "Every15s": {
+      "main": [
+        [
+          {
+            "node": "PgPending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PgPending": {
+      "main": [
+        [
+          {
+            "node": "HasRow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HasRow": {
+      "main": [
+        [
+          {
+            "node": "SOutbox",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "SOutbox": {
+      "main": [
+        [
+          {
+            "node": "SMarkSent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SMarkSent": {
+      "main": [
+        [
+          {
+            "node": "SCrm",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {},
+  "nodes": [
+    {
+      "id": "node-1",
+      "name": "Every15s",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "seconds",
+              "secondsInterval": 15
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-2",
+      "name": "PgPending",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT email FROM leads3 WHERE status='pending' AND created_at < now() - interval '10 seconds';",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-3",
+      "name": "HasRow",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.email }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "node-4",
+      "name": "SOutbox",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8790/fake/outbox",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ source: 'sweeper', payload: { email: $('PgPending').item.json.email } }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-5",
+      "name": "SMarkSent",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE leads3 SET status='sent' WHERE email=$1 RETURNING email;",
+        "options": {
+          "queryReplacement": "={{ $('PgPending').item.json.email }}"
+        }
+      }
+    },
+    {
+      "id": "node-6",
+      "name": "SCrm",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8790/fake/crm",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ source: 'sweeper', payload: { email: $json.email } }) }}",
+        "options": {}
+      }
+    }
+  ]
+}

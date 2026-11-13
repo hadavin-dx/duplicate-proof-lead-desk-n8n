@@ -1,0 +1,700 @@
+# CHANGES-FROM-ORIGINAL: unified diff of the 2026-11-09 scripts (a/) against the shipped harness (b/).
+# EDIT NOTE: after it was generated, only these '#' header comment lines were reworded (no diff line, '+' or '-', was touched): the "Made by ..." sentence of the platform start-up change and the "FIX 1" heading (private dates removed), and this note was added. The words "lead ruling" in the diff body (lines starting with '-' or '+') are in the original 2026-11-09 code and in a snapshot of the first-round code: they mean the relaxed rule for variant d (see README.md); the current code says "relaxed rule for d".
+# NOTE: this file was generated at the first round of changes after code review and is not regenerated; later changes (Linux support, idle check, manifest, clean stop, and so on) are in git history. Only the wording of three comment lines (the word 'author') was edited afterwards.
+# Files with no diff are byte-identical apart from line endings: fakes2.py mkwf2.py deploy2.py g12.py g3.py deploy3.py.
+# Not shipped: master.py master2.py master3.py (assumed a prepared machine; replaced by the new run_all.py), summ12.py summ3.py summ3e.py (replaced by the new summarise.py), the start script of n8n (its environment is now set in lib.py).
+# New files (no original): harness/setup.py harness/deploy_b.py harness/run_all.py harness/summarise.py harness/sums.py harness/build_workflows.py
+# Literals that were removed from the code (a password, an e-mail address, two n8n ids, a program path) are shown masked in the minus lines, so this file is not exactly applicable.
+# Platform start-up change (no result change): n8n and the stand-in server are started with CREATE_NO_WINDOW (0x08000000) instead of DETACHED_PROCESS (0x8), so that n8n's task runner does not open a visible console window; stdout and stderr still go to the same files and taskkill /T still ends the tree. Made during a rerun on the same computer: scripts started before the change imported the old flags.
+# Raw result files: time of day removed (kept: date), the n8n workflow id inside retry_responses replaced by <id>; no count was edited.
+--- a/lib.py
++++ b/lib.py
+@@ -1,8 +1,14 @@
+ import json, time, subprocess, re, os, sys, threading, uuid, collections, urllib.request, urllib.error
+ import api
+-HERE = os.path.dirname(os.path.abspath(__file__))
++HERE = os.path.dirname(os.path.abspath(__file__))  # the folder of the harness scripts
++WORK = os.environ["N8N_EVD_WORK"]  # CHANGED: work folder (n8n install, n8n data, results); every script runs with it as the current folder
++NODE_DIR = os.environ["N8N_EVD_NODE"]  # CHANGED: folder that holds node.exe (Node 24.x)
++PG = os.environ.get("N8N_EVD_PG", "n8n-publish-pg")  # CHANGED: name of the Postgres container (variants b and e)
+ FAKE = "http://127.0.0.1:8790"
+-P = "<project id literal removed>"
++def _project_id():  # CHANGED: was a literal id of the original run's n8n; now read from the file setup.py writes
++    try: return json.load(open(os.path.join(WORK, ".run", "instance.json")))["project_id"]
++    except OSError: return ""
++P = _project_id()
+ def fget(path): return json.load(urllib.request.urlopen(FAKE + path, timeout=10))
+ def fpost(path, body=""): urllib.request.urlopen(urllib.request.Request(FAKE + path, str(body).encode(), method="POST"), timeout=10).read()
+ def delays(**kw): fpost("/ctl/delays", json.dumps(kw))
+@@ -23,16 +29,21 @@
+     env = dict(os.environ)
+     if limit: env["N8N_CONCURRENCY_PRODUCTION_LIMIT"] = str(limit)
+     else: env.pop("N8N_CONCURRENCY_PRODUCTION_LIMIT", None)
+-    f = open(os.path.join(HERE, log), "ab")
+-    subprocess.Popen(["<Git-bash path removed>", "<start script>", "start"], cwd=HERE, env=env, stdout=f, stderr=f, creationflags=0x00000008 | 0x00000200)
++    f = open(os.path.join(WORK, log), "ab")
++    # CHANGED: the environment of the old start script, set here; node.exe is started directly (no Git-bash wrapper)
++    env.update(PATH=NODE_DIR + os.pathsep + env.get("PATH", ""), N8N_USER_FOLDER=os.path.join(WORK, "n8nhome"), N8N_DIAGNOSTICS_ENABLED="false",
++               N8N_VERSION_NOTIFICATIONS_ENABLED="false", N8N_PERSONALIZATION_ENABLED="false", N8N_HOST="127.0.0.1", N8N_LISTEN_ADDRESS="127.0.0.1",
++               N8N_PORT="5679", N8N_RUNNERS_BROKER_PORT="5780", N8N_TEMPLATES_ENABLED="false", N8N_HIRING_BANNER_ENABLED="false",
++               N8N_RUNNERS_ENABLED="true", N8N_SECURE_COOKIE="false")
++    subprocess.Popen([os.path.join(NODE_DIR, "node.exe"), os.path.join("node_modules", "n8n", "bin", "n8n"), "start"], cwd=WORK, env=env, stdout=f, stderr=f, creationflags=0x08000000 | 0x00000200)
+     ok = up(); time.sleep(3); return ok
+ def kill_n8n():
+     pid = listener_pid(5679)
+     if pid: subprocess.run(f"taskkill /F /T /PID {pid}", shell=True, capture_output=True)
+     return pid
+ def start_fakes():
+-    f = open(os.path.join(HERE, "fakes2.log"), "ab")
+-    subprocess.Popen([sys.executable, "fakes2.py"], cwd=HERE, stdout=f, stderr=f, creationflags=0x00000008 | 0x00000200)
++    f = open(os.path.join(WORK, "fakes2.log"), "ab")  # CHANGED: runs in the work folder, so calls2.jsonl is written there
++    subprocess.Popen([sys.executable, os.path.join(HERE, "fakes2.py")], cwd=WORK, stdout=f, stderr=f, creationflags=0x08000000 | 0x00000200)
+     time.sleep(1.5)
+ def kill_fakes():
+     pid = listener_pid(8790)
+--- a/api.py
++++ b/api.py
+@@ -2,13 +2,16 @@
+ cj = http.cookiejar.CookieJar()
+ op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+ B = "http://127.0.0.1:5679/rest"
++import os
++def _owner():  # CHANGED: was a literal account; now the generated one that setup.py wrote
++    return json.load(open(os.path.join(os.environ["N8N_EVD_WORK"], ".run", "owner.json")))
+ def call(m, p, body=None):
+     r = urllib.request.Request(B + p, json.dumps(body).encode() if body is not None else None, {"Content-Type": "application/json", "browser-id": "wp0b"}, method=m)
+     try:
+         return json.load(op.open(r))
+     except urllib.error.HTTPError as e:
+         return {"HTTPError": e.code, "body": e.read().decode()[:600]}
+-def login(): return call("POST", "/login", {"emailOrLdapLoginId": "<owner e-mail literal removed>", "password": "<password literal removed>"})
++def login(): o = _owner(); return call("POST", "/login", {"emailOrLdapLoginId": o["email"], "password": o["password"]})
+ def deploy(fn, name):
+     w = json.load(open(fn)); w.pop("id", None); w["name"] = name; w.pop("active", None)
+     c = call("POST", "/workflows", w)
+--- a/mkwf3.py
++++ b/mkwf3.py
+@@ -1,6 +1,10 @@
+ import json, mkwf2
+ from mkwf2 import hook, http, chain
+-CRED = ("<credential id literal removed>", "wp0b-pg")
++import os  # CHANGED: the credential id was a literal id of the original run's n8n; now read from the file setup.py writes
++def _cred():
++    try: return (json.load(open(os.path.join(os.environ["N8N_EVD_WORK"], ".run", "instance.json")))["pg_credential_id"], "n8n-publish-pg")
++    except (OSError, KeyError): return ("", "n8n-publish-pg")
++CRED = _cred()
+ def pg(name, query, pos, repl=None):
+     o = {"options": {}}
+     if repl: o["options"]["queryReplacement"] = repl
+--- a/g12e.py
++++ b/g12e.py
+@@ -3,7 +3,7 @@
+ for run in range(1, 6):
+     api.login(); em = f"e3-burst-{run}-{uuid.uuid4().hex[:6]}@example.com"
+     rep = lib.fire("e3", em, n=10, rid_prefix="b", timeout=60); time.sleep(5)
+-    st = subprocess.run(['docker', 'exec', 'wp0b3-pg', 'psql', '-U', 'postgres', '-At', '-c', "select status from leads3 where email='%s'" % em], capture_output=True, text=True).stdout.strip()
++    st = subprocess.run(['docker', 'exec', lib.PG, 'psql', '-U', 'postgres', '-At', '-c', "select status from leads3 where email='%s'" % em], capture_output=True, text=True).stdout.strip()
+     row = {"run": run, "email": em, "replies": rep, "spread_ms": lib.SENT_SPREAD_MS, "counts": lib.per_email(em), "db_status": st}
+     time.sleep(30); row["counts_after_35s"] = lib.per_email(em)
+     out.write(json.dumps(row) + "\n"); out.flush(); print(json.dumps(row), flush=True)
+--- a/g3e.py
++++ b/g3e.py
+@@ -3,7 +3,7 @@
+ KEY = {"K3": ("outbox_pre", {"outbox_pre": 3}), "K2": ("outbox_post", {"outbox_post": 3}), "K1": ("crm_pre", {"crm_pre": 3})}[kp]
+ out = open("g3e_%s.jsonl" % kp, "a")
+ def db(em):
+-    r = subprocess.run(['docker', 'exec', 'wp0b3-pg', 'psql', '-U', 'postgres', '-At', '-c', "select status from leads3 where email='%s'" % em], capture_output=True, text=True).stdout.strip()
++    r = subprocess.run(['docker', 'exec', lib.PG, 'psql', '-U', 'postgres', '-At', '-c', "select status from leads3 where email='%s'" % em], capture_output=True, text=True).stdout.strip()
+     return r or "no-row"
+ for run in range(1, nruns + 1):
+     em = f"e3-{kp}-{run}-{uuid.uuid4().hex[:6]}@example.com"; row = {"kill_point": kp, "run": run, "email": em, "mode": "blind"}
+
+
+# ===== FIX 1 (the first round of changes after code review): unified diff of the harness folder against the commit before the fix. Polling instead of fixed waits, attempt accounting, kill validity, return codes, fresh result files, own PIDs only, minimal environment, load samples; new tests in tests/test_n8n_evidence.py. =====
+diff --git a/g12.py b/g12.py
+index 9da018e..af1d392 100644
+--- a/g12.py
++++ b/g12.py
+@@ -5,19 +5,26 @@ for _ in range(30):
+     if isinstance(l, dict) and "data" in l and "HTTPError" not in l: break
+     time.sleep(2)
+ ids = json.load(open("ids.json")); wid = ids["wp0b2-g2-" + variant]; path = {"b": "g2-b2", "c": "g2-c2"}.get(variant, "g2-" + variant)
+-out = open(f"g12_{variant}_{port_limit}.jsonl", "a"); ok = 0; invalid = 0; attempt = 0
++fn = f"g12_{variant}_{port_limit}.jsonl"; lib.require_fresh(fn)  # FIX1: never append to old results
++out = open(fn, "a"); ok = 0; invalid = 0; attempt = 0
++slim = lambda s: {"timed_out": s["timed_out"], "waited_s": s["waited_s"]}  # FIX1: the settle result without the counts
+ while ok < nruns and attempt < nruns + 15:
+     attempt += 1; em = f"g12-{variant}-{attempt}-{uuid.uuid4().hex[:6]}@example.com"
+     lib.fpost("/ctl/delays", "{}")
+-    t0 = time.time(); rep1 = lib.fire(path, em, rid_prefix="a1"); time.sleep(1.0)
+-    c1 = lib.per_email(em); ov = lib.overlap(lib.execs(wid, lib.iso(t0 - 0.5)))
++    t0 = time.time(); since = lib.iso(t0 - 0.5); rep1 = lib.fire(path, em, rid_prefix="a1")
++    s1 = lib.wait_quiet(em, wid, since, quiet_s=3, timeout=60)  # FIX1: poll until quiet (was: sleep 1.0 s); a timeout is recorded and makes the run invalid
++    c1 = s1["counts"]; ov = lib.overlap(lib.execs(wid, since))
+     sent = lib.SENT_SPREAD_MS
+-    valid = ov.get("n") == 10 and ov.get("latest_start_before_earliest_stop") is True
+-    if variant == "d": valid = ov.get("n") == 10 and sent is not None and sent < 100  # lead ruling: serialised variant, valid = arrived together + 10 executions listed
+-    row = {"variant": variant, "setting": port_limit, "attempt": attempt, "email": em, "valid": valid, "client_send_spread_ms": sent, "label": ("valid under lead ruling for serialised variant" if variant == "d" and valid else None), "replies": rep1, "after_run1": c1, "overlap": ov}
++    valid = ov.get("n") == 10 and ov.get("latest_start_before_earliest_stop") is True and not s1["timed_out"]
++    if variant == "d": valid = ov.get("n") == 10 and sent is not None and sent < 100 and not s1["timed_out"]  # lead ruling: serialised variant, valid = arrived together + 10 executions listed
++    row = {"variant": variant, "setting": port_limit, "attempt": attempt, "email": em, "valid": valid, "client_send_spread_ms": sent, "label": ("valid under lead ruling for serialised variant" if variant == "d" and valid else None), "replies": rep1, "after_run1": c1, "overlap": ov, "settle1": slim(s1)}
+     if valid:
+-        time.sleep(4.0); rep2 = lib.fire(path, em, rid_prefix="a2"); time.sleep(1.0); c2 = lib.per_email(em)
+-        row.update({"replay_replies": rep2, "after_replay": c2, "replay_added": {k: c2[k] - c1[k] for k in c1}}); ok += 1
++        rep2 = lib.fire(path, em, rid_prefix="a2")  # the replay follows as soon as the first ten are quiet (was: 4 s later)
++        s2 = lib.wait_quiet(em, wid, since, quiet_s=3, timeout=60); c2 = s2["counts"]
++        row.update({"replay_replies": rep2, "after_replay": c2, "replay_added": {k: c2[k] - c1[k] for k in c1}, "settle2": slim(s2)})
++        if s2["timed_out"]: row["valid"] = False; invalid += 1
++        else: ok += 1
+     else: invalid += 1
+     out.write(json.dumps(row) + "\n"); out.flush(); print(json.dumps(row), flush=True)
+ print("DONE valid", ok, "invalid", invalid, flush=True)
++sys.exit(0 if ok == nruns else 1)  # FIX1: fewer valid runs than asked is a failure, not a quiet success
+diff --git a/g12e.py b/g12e.py
+index 6446cdf..413f609 100644
+--- a/g12e.py
++++ b/g12e.py
+@@ -1,9 +1,12 @@
+-import lib, api, json, time, uuid, subprocess
+-out = open("g12e.jsonl", "a"); lib.fpost("/ctl/delays", "{}")
++import lib, api, json, time, uuid, subprocess, sys
++lib.require_fresh("g12e.jsonl"); out = open("g12e.jsonl", "a"); lib.fpost("/ctl/delays", "{}"); bad = 0
+ for run in range(1, 6):
+     api.login(); em = f"e3-burst-{run}-{uuid.uuid4().hex[:6]}@example.com"
+-    rep = lib.fire("e3", em, n=10, rid_prefix="b", timeout=60); time.sleep(5)
++    rep = lib.fire("e3", em, n=10, rid_prefix="b", timeout=60)
++    s1 = lib.wait_quiet(em, quiet_s=5, timeout=60)  # FIX1: poll until quiet for 5 s (was: sleep 5 s)
+     st = subprocess.run(['docker', 'exec', lib.PG, 'psql', '-U', 'postgres', '-At', '-c', "select status from leads3 where email='%s'" % em], capture_output=True, text=True).stdout.strip()
+-    row = {"run": run, "email": em, "replies": rep, "spread_ms": lib.SENT_SPREAD_MS, "counts": lib.per_email(em), "db_status": st}
+-    time.sleep(30); row["counts_after_35s"] = lib.per_email(em)
++    row = {"run": run, "email": em, "replies": rep, "spread_ms": lib.SENT_SPREAD_MS, "counts": s1["counts"], "db_status": st, "settle1": {"timed_out": s1["timed_out"], "waited_s": s1["waited_s"]}}
++    time.sleep(30); row["counts_after_35s"] = lib.per_email(em)  # observation point of the re-send job (it runs every 15 s), not a settle wait
++    bad += s1["timed_out"]
+     out.write(json.dumps(row) + "\n"); out.flush(); print(json.dumps(row), flush=True)
++sys.exit(1 if bad else 0)
+diff --git a/g3.py b/g3.py
+index ea8960c..586d3d3 100644
+--- a/g3.py
++++ b/g3.py
+@@ -2,7 +2,9 @@ import lib, api, json, time, sys, uuid, collections
+ variant = sys.argv[1]; kp = sys.argv[2]; nruns = int(sys.argv[3]); limit = 1 if variant == "d" else None
+ KEY = {"K1": ("outbox_pre", {"outbox_pre": 3}), "K2": ("outbox_post", {"outbox_post": 3}), "K3": ("crm_pre", {"crm_pre": 3})}[kp]
+ ids = json.load(open("ids.json")); wid = ids["wp0b2-g2-" + variant]; path = {"b": "g2-b2", "c": "g2-c2"}.get(variant, "g2-" + variant)
+-out = open(f"g3_{variant}.jsonl", "a")
++fn = f"g3_{variant}.jsonl"; lib.require_fresh(fn, kill_point=kp)  # FIX1: the three kill points share one file, each may be written once
++out = open(fn, "a")
++slim = lambda s: {"timed_out": s["timed_out"], "waited_s": s["waited_s"]}  # FIX1: the settle result without the counts
+ def statuses(rows): return dict(collections.Counter(x["status"] for x in rows))
+ for run in range(1, nruns + 1):
+     em = f"g3-{variant}-{kp}-{run}-{uuid.uuid4().hex[:6]}@example.com"; row = {"variant": variant, "kill_point": kp, "run": run, "email": em}
+@@ -16,7 +18,9 @@ for run in range(1, nruns + 1):
+     row["trigger_seen_after_s"] = trig; row["fake_state_at_kill"] = lib.fget("/ctl/state"); row["counts_at_kill"] = lib.per_email(em)
+     row["killed_pid"] = bool(lib.kill_n8n())
+     th.join(); row["client_replies_during_kill"] = dict(rep)
+-    lib.fpost("/ctl/delays", "{}"); time.sleep(4.5); row["counts_after_inflight_settled"] = lib.per_email(em)
++    lib.fpost("/ctl/delays", "{}")
++    w1 = lib.wait_quiet(em, quiet_s=2, timeout=30)  # FIX1: poll until the stand-in holds no request and the counts stand still (was: sleep 4.5 s)
++    row["counts_after_inflight_settled"] = w1["counts"]; row["wait_settled"] = slim(w1)
+     row["n8n_restarted_ok"] = lib.start_n8n(limit); api.login()
+     t_w = time.time(); rows = []
+     while time.time() - t_w < 40:  # n8n marks the crashed execution some seconds after startup; wait for it (max 40 s)
+@@ -28,7 +32,8 @@ for run in range(1, nruns + 1):
+     rt = []
+     for i in crashed: rt.append(api.call("POST", f"/executions/{i}/retry", {"loadWorkflow": False}))
+     row["retry_pressed_n"] = len(crashed); row["retry_responses"] = [str(x)[:160] for x in rt]
+-    time.sleep(7); row["final"] = lib.per_email(em)
++    w2 = lib.wait_quiet(em, wid, lib.iso(t0 - 0.5), quiet_s=3, timeout=60)  # FIX1: poll until the retried execution is finished and quiet (was: sleep 7 s)
++    row["final"] = w2["counts"]; row["wait_after_retry"] = slim(w2)
+     rows2 = lib.execs(wid, lib.iso(t0 - 0.5)); row["exec_status_after_retry"] = statuses(rows2)
+     row["exec_list_after_retry"] = [{"id": x["id"], "status": x["status"], "mode": x.get("mode"), "retryOf": x.get("retryOf")} for x in rows2 if x["status"] != "success" or x.get("retryOf") or x.get("mode") == "retry"]
+     out.write(json.dumps(row) + "\n"); out.flush(); print(json.dumps(row), flush=True)
+diff --git a/g3e.py b/g3e.py
+index fb6b14d..0e52ccc 100644
+--- a/g3e.py
++++ b/g3e.py
+@@ -1,7 +1,8 @@
+ import lib, api, json, time, sys, uuid, subprocess
+ kp = sys.argv[1]; nruns = int(sys.argv[2])
+ KEY = {"K3": ("outbox_pre", {"outbox_pre": 3}), "K2": ("outbox_post", {"outbox_post": 3}), "K1": ("crm_pre", {"crm_pre": 3})}[kp]
+-out = open("g3e_%s.jsonl" % kp, "a")
++fn = "g3e_%s.jsonl" % kp; lib.require_fresh(fn)  # FIX1: never append to old results
++out = open(fn, "a")
+ def db(em):
+     r = subprocess.run(['docker', 'exec', lib.PG, 'psql', '-U', 'postgres', '-At', '-c', "select status from leads3 where email='%s'" % em], capture_output=True, text=True).stdout.strip()
+     return r or "no-row"
+@@ -18,11 +19,13 @@ for run in range(1, nruns + 1):
+     row["at_kill"] = dict(lib.per_email(em), db=db(em))
+     row["killed_pid"] = bool(lib.kill_n8n())
+     th.join(); row["client_replies_during_kill"] = dict(rep)
+-    lib.fpost("/ctl/delays", "{}"); time.sleep(4.5); row["after_inflight_settled"] = dict(lib.per_email(em), db=db(em))
++    lib.fpost("/ctl/delays", "{}")
++    w1 = lib.wait_quiet(em, quiet_s=2, timeout=30)  # FIX1: poll until the stand-in holds no request and the counts stand still (was: sleep 4.5 s)
++    row["after_inflight_settled"] = dict(w1["counts"], db=db(em)); row["wait_settled"] = {"timed_out": w1["timed_out"], "waited_s": w1["waited_s"]}
+     t_up = time.time(); row["n8n_restarted_ok"] = lib.start_n8n(None); t_up = time.time()
+     samples = []
+     for s in (5, 15, 25, 40, 60):
+         time.sleep(max(0, t_up + s - time.time())); samples.append(dict(lib.per_email(em), db=db(em), t_after_restart_s=s))
+-    row["samples"] = samples
++    row["samples"] = samples  # the samples are observation points of a re-send job that runs every 15 s: fixed times by design, not settle waits
+     row["after_restart_5s"] = samples[0]; row["after_60s"] = samples[-1]
+     out.write(json.dumps(row) + "\n"); out.flush(); print(json.dumps(row), flush=True)
+diff --git a/lib.py b/lib.py
+index 38d964d..f1750ea 100644
+--- a/lib.py
++++ b/lib.py
+@@ -18,6 +18,29 @@ def per_email(email):
+ def listener_pid(port):
+     o = subprocess.run("netstat -ano", capture_output=True, text=True, shell=True).stdout
+     m = re.search(r"127\.0\.0\.1:%d\s+0\.0\.0\.0:0\s+LISTENING\s+(\d+)" % port, o); return m and m.group(1)
++def port_free(port):  # FIX1: true when nothing listens on the port
++    import socket
++    with socket.socket() as s:
++        s.settimeout(0.5); return s.connect_ex(("127.0.0.1", port)) != 0
++def _pid_file(): return os.path.join(WORK, ".run", "pids.json")
++def record_pid(name, pid):  # FIX1: remember the process this harness started, so it only ever stops that one
++    os.makedirs(os.path.dirname(_pid_file()), exist_ok=True)
++    try: d = json.load(open(_pid_file()))
++    except (OSError, ValueError): d = {}
++    d[name] = pid; json.dump(d, open(_pid_file(), "w"))
++def _recorded_pid(name):
++    try: return json.load(open(_pid_file())).get(name)
++    except (OSError, ValueError): return None
++def _kill_recorded(name):
++    pid = _recorded_pid(name)
++    if not pid: return None  # never started by this harness (or already stopped): kill nothing, whatever holds the port
++    subprocess.run(f"taskkill /F /T /PID {pid}", shell=True, capture_output=True); record_pid(name, 0)
++    return str(pid)
++def _wait_port_free(port, timeout=20):
++    for _ in range(timeout * 2):
++        if port_free(port): return True
++        time.sleep(0.5)
++    return False
+ def up(timeout=120):
+     for _ in range(timeout):
+         try:
+@@ -25,29 +48,62 @@ def up(timeout=120):
+         except Exception: pass
+         time.sleep(1)
+     return False
+-def start_n8n(limit=None, log="n8n2.log"):
+-    env = dict(os.environ)
++def _base_env():  # FIX1: explicit minimal environment (nothing of the parent's secrets or settings is inherited)
++    keep = ("SystemRoot", "SystemDrive", "windir", "ComSpec", "PATHEXT", "TEMP", "TMP", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "OS", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE")
++    env = {k: os.environ[k] for k in keep if k in os.environ}
++    root = os.environ.get("SystemRoot") or os.path.join(os.environ.get("SystemDrive", "C:") + os.sep, "Windows")
++    env["PATH"] = os.pathsep.join([NODE_DIR, os.path.join(root, "System32"), root])
++    return env
++def n8n_env(limit=None):
++    env = _base_env()
+     if limit: env["N8N_CONCURRENCY_PRODUCTION_LIMIT"] = str(limit)
+-    else: env.pop("N8N_CONCURRENCY_PRODUCTION_LIMIT", None)
+-    f = open(os.path.join(WORK, log), "ab")
+     # CHANGED: the environment of the old start script, set here; node.exe is started directly (no Git-bash wrapper)
+-    env.update(PATH=NODE_DIR + os.pathsep + env.get("PATH", ""), N8N_USER_FOLDER=os.path.join(WORK, "n8nhome"), N8N_DIAGNOSTICS_ENABLED="false",
++    env.update(N8N_USER_FOLDER=os.path.join(WORK, "n8nhome"), N8N_DIAGNOSTICS_ENABLED="false",
+                N8N_VERSION_NOTIFICATIONS_ENABLED="false", N8N_PERSONALIZATION_ENABLED="false", N8N_HOST="127.0.0.1", N8N_LISTEN_ADDRESS="127.0.0.1",
+                N8N_PORT="5679", N8N_RUNNERS_BROKER_PORT="5780", N8N_TEMPLATES_ENABLED="false", N8N_HIRING_BANNER_ENABLED="false",
+                N8N_RUNNERS_ENABLED="true", N8N_SECURE_COOKIE="false")
+-    subprocess.Popen([os.path.join(NODE_DIR, "node.exe"), os.path.join("node_modules", "n8n", "bin", "n8n"), "start"], cwd=WORK, env=env, stdout=f, stderr=f, creationflags=0x08000000 | 0x00000200)
++    return env
++def start_n8n(limit=None, log="n8n2.log"):
++    if not _wait_port_free(5679, 20) or not port_free(5780): raise RuntimeError("port 5679 or 5780 is busy: refusing to start n8n")
++    f = open(os.path.join(WORK, log), "ab")
++    p = subprocess.Popen([os.path.join(NODE_DIR, "node.exe"), os.path.join("node_modules", "n8n", "bin", "n8n"), "start"], cwd=WORK, env=n8n_env(limit), stdout=f, stderr=f, creationflags=0x08000000 | 0x00000200)
++    record_pid("n8n", p.pid)
+     ok = up(); time.sleep(3); return ok
+-def kill_n8n():
+-    pid = listener_pid(5679)
+-    if pid: subprocess.run(f"taskkill /F /T /PID {pid}", shell=True, capture_output=True)
+-    return pid
++def kill_n8n(): return _kill_recorded("n8n")
+ def start_fakes():
++    if not port_free(8790): raise RuntimeError("port 8790 is busy: refusing to start the stand-in server")
+     f = open(os.path.join(WORK, "fakes2.log"), "ab")  # CHANGED: runs in the work folder, so calls2.jsonl is written there
+-    subprocess.Popen([sys.executable, os.path.join(HERE, "fakes2.py")], cwd=WORK, stdout=f, stderr=f, creationflags=0x08000000 | 0x00000200)
++    p = subprocess.Popen([sys.executable, os.path.join(HERE, "fakes2.py")], cwd=WORK, env=_base_env(), stdout=f, stderr=f, creationflags=0x08000000 | 0x00000200)
++    record_pid("fakes", p.pid)
+     time.sleep(1.5)
+-def kill_fakes():
+-    pid = listener_pid(8790)
+-    if pid: subprocess.run(f"taskkill /F /T /PID {pid}", shell=True, capture_output=True)
++def kill_fakes(): return _kill_recorded("fakes")
++def require_fresh(path, kill_point=None):  # FIX1: never append to results of an earlier run
++    if not os.path.exists(path): return
++    if kill_point is None: sys.exit("refusing to append to existing results: " + path)
++    rows = [json.loads(x) for x in open(path, encoding="utf-8") if x.strip()]
++    if any(r.get("kill_point") == kill_point for r in rows): sys.exit("refusing to append: %s already holds rows for %s" % (path, kill_point))
++def fake_busy():  # FIX1: true while a request is still held inside the stand-in server
++    try: return any(fget("/ctl/state").values())
++    except Exception: return True
++def wait_quiet(email, wid=None, since=None, quiet_s=3.0, timeout=60.0, poll=0.25):
++    """FIX1: poll until the CRM/email post counts for `email` have not changed for quiet_s seconds and (with wid) no execution since `since`
++    is unfinished and the stand-in server holds no request. Gives up after `timeout` seconds and says so (timed_out True): the caller must record that, never count it silently."""
++    t0 = time.monotonic(); last = None; stable_since = t0
++    while True:
++        now = time.monotonic(); c = per_email(email)
++        busy = fake_busy() or (bool(wid) and any(x.get("status") in ("running", "new", "waiting") for x in execs(wid, since)))
++        if busy or c != last: last = c; stable_since = now
++        elif now - stable_since >= quiet_s: return {"counts": c, "timed_out": False, "waited_s": round(now - t0, 2)}
++        if now - t0 >= timeout: return {"counts": c, "timed_out": True, "waited_s": round(now - t0, 2)}
++        time.sleep(poll)
++def machine_load():  # FIX1: CPU idle percent and free RAM (MB) right now; {"error": ...} when it cannot be read
++    cmd = ["powershell", "-NoProfile", "-Command", r"$c=(Get-Counter '\Processor(_Total)\% Idle Time').CounterSamples[0].CookedValue; $m=(Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory; Write-Host ($c.ToString([cultureinfo]::InvariantCulture)) $m"]
++    try:
++        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30); a, b = r.stdout.split()
++        return {"cpu_idle_pct": round(float(a), 1), "free_ram_mb": round(float(b) / 1024, 1)}
++    except Exception as e: return {"error": type(e).__name__}
++def log_load(setup, when):  # appended to load.jsonl in the work folder
++    with open(os.path.join(WORK, "load.jsonl"), "a") as f: f.write(json.dumps(dict(setup=setup, when=when, **machine_load())) + chr(10))
+ def lead(email, rid): return json.dumps({"source": "webhook", "request_id": rid, "payload": {"name": "Asha Verma", "email": email}}).encode()
+ def fire(path, email, n=10, rid_prefix="r", timeout=60):
+     url = f"http://127.0.0.1:5679/webhook/{path}"; bar = threading.Barrier(n); res = []
+@@ -74,7 +130,8 @@ def execs(wid, since_iso=None, limit=60):
+     return rows
+ import urllib.parse
+ def iso(t=None):
+-    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t or time.time())) + (".%03dZ" % int(((t or time.time()) % 1) * 1000))
++    t = t or time.time()  # FIX1: one clock read (was two)
++    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t)) + (".%03dZ" % int((t % 1) * 1000))
+ def parse(s):
+     from datetime import datetime
+     return datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
+diff --git a/run_all.py b/run_all.py
+index 1f8ad48..f4ecbe6 100644
+--- a/run_all.py
++++ b/run_all.py
+@@ -3,8 +3,9 @@ Order of one full run: Postgres container, fake server, n8n; setup; deploy a, d,
+ concurrency); G1+G2 and G3 for d (n8n concurrency limit 1); G3 for a, c, b; restart; deploy e; kill runs for e; burst for e.
+   python harness/run_all.py --work-dir data/n8n_evidence_run/<name> --node-dir <folder with node.exe> [--smoke]
+ --smoke: variant b only, 3 runs per gate. The work folder must already hold `npm ci` output (node_modules) and be
+-free of results; the script refuses to start otherwise. Stops only what it started (n8n, fake server, the container
+-labelled n8n-evidence.run=1)."""
++free of results; the script refuses to start otherwise. Stops only what it started (the n8n and stand-in processes whose PIDs
++it recorded in <work>/.run/pids.json, and the container it created; it refuses to start if a container with the label n8n-evidence.run=1 or a busy port exists).
++Every step's exit code is checked; a failing step stops the run. Machine load before and after every set-up goes to load.jsonl."""
+ import argparse, json, os, secrets, socket, subprocess, sys, time
+ 
+ HERE = os.path.dirname(os.path.abspath(__file__))
+@@ -20,6 +21,16 @@ def port_free(p):
+         return s.connect_ex(("127.0.0.1", p)) != 0
+ 
+ 
++def run_script(work, env, *args, tag=None):
++    """FIX1: run one harness script in the work folder; any non-zero exit code stops the whole run (it used to be ignored)."""
++    print(">>", " ".join(args), time.strftime("%H:%M:%SZ", time.gmtime()), flush=True)
++    out = open(os.path.join(work, "master_%s.out" % (tag or "_".join(args[:3]))), "w")
++    rc = subprocess.run([sys.executable, os.path.join(HERE, args[0]), *args[1:]], cwd=work, env=env, stdout=out, stderr=subprocess.STDOUT).returncode
++    out.close()
++    if rc: sys.exit("step failed with exit code %s: %s (see master_%s.out)" % (rc, " ".join(args), tag or "_".join(args[:3])))
++    return rc
++
++
+ def main():
+     ap = argparse.ArgumentParser()
+     ap.add_argument("--work-dir", required=True); ap.add_argument("--node-dir", required=True); ap.add_argument("--smoke", action="store_true")
+@@ -28,6 +39,8 @@ def main():
+     if not os.path.isdir(os.path.join(work, "node_modules", "n8n")): sys.exit("work folder has no node_modules/n8n: run npm ci there first")
+     stale = [f for f in os.listdir(work) if f.startswith(("g12", "g3", "calls2", "ids", "master_")) or f in (".run", "n8nhome")]
+     if stale: sys.exit("work folder is not fresh (refusing to append to old results): %s" % stale[:5])
++    old = subprocess.run(["docker", "ps", "-aq", "--filter", "label=" + LABEL], capture_output=True, text=True).stdout.split()
++    if old: sys.exit("a container with the label %s already exists (%d): not starting, so that cleanup removes only what this run started" % (LABEL, len(old)))
+     busy = [p for p in PORTS if not port_free(p)]
+     if busy: sys.exit("ports in use, not starting: %s" % busy)
+     env = dict(os.environ, N8N_EVD_WORK=work, N8N_EVD_NODE=os.path.abspath(a.node_dir), N8N_EVD_PG=PG_NAME)
+@@ -37,10 +50,10 @@ def main():
+     pgpw = secrets.token_urlsafe(24)
+     with open(os.path.join(work, ".run", "pg.json"), "x") as f: json.dump({"password": pgpw}, f)
+ 
+-    def py(*args, tag=None):
+-        print(">>", " ".join(args), time.strftime("%H:%M:%SZ", time.gmtime()), flush=True)
+-        out = open(os.path.join(work, "master_%s.out" % (tag or "_".join(args[:3]))), "w")
+-        return subprocess.run([sys.executable, os.path.join(HERE, args[0]), *args[1:]], cwd=work, env=env, stdout=out, stderr=subprocess.STDOUT).returncode
++    def py(*args, tag=None): return run_script(work, env, *args, tag=tag)  # FIX1: a failing step stops the run
++
++    def phase(setup, *args, tag=None):  # FIX1: machine load before and after every set-up (load.jsonl)
++        lib.log_load(setup, "before"); py(*args, tag=tag); lib.log_load(setup, "after")
+ 
+     import lib
+     try:
+@@ -53,10 +66,9 @@ def main():
+         os.chdir(work)
+         lib.start_fakes()
+         print("n8n up (limit 1):", lib.start_n8n(1), flush=True)
+-        if py("setup.py", tag="setup"): sys.exit("setup failed (see master_setup.out)")
++        py("setup.py", tag="setup")
+         for what in (("a",), ("d",), ("c", COND), ("b",)):
+-            rc = py("deploy_b.py", tag="deploy_b") if what == ("b",) else py("deploy2.py", *what, tag="deploy_" + what[0])
+-            if rc: sys.exit("deploy %s failed" % what[0])
++            py("deploy_b.py", tag="deploy_b") if what == ("b",) else py("deploy2.py", *what, tag="deploy_" + what[0])
+         ids = json.load(open("ids.json"))  # g12.py and g3.py look variant c up under "wp0b2-g2-c"; its workflow is named wp0b2-g2-c2
+         ids["wp0b2-g2-c"] = ids["wp0b2-g2-c2"]
+         json.dump(ids, open("ids.json", "w"))
+@@ -64,20 +76,20 @@ def main():
+         k = "3" if a.smoke else "5"
+         if a.smoke:  # variant b only, n8n at default concurrency
+             lib.kill_n8n(); time.sleep(2); print("n8n default up:", lib.start_n8n(None), flush=True)
+-            py("g12.py", "b", "default", n, tag="g12_b_default")
+-            for kp in ("K1", "K2", "K3"): py("g3.py", "b", kp, k, tag="g3_b_" + kp)
++            phase("b default", "g12.py", "b", "default", n, tag="g12_b_default")
++            phase("b kill runs", "g3.py", "b", "K1", k, tag="g3_b_K1"); phase("b kill runs K2", "g3.py", "b", "K2", k, tag="g3_b_K2"); phase("b kill runs K3", "g3.py", "b", "K3", k, tag="g3_b_K3")
+             return
+         lib.kill_n8n(); time.sleep(2); print("n8n default up:", lib.start_n8n(None), flush=True)
+-        for v in ("a", "b", "c"): py("g12.py", v, "default", n, tag="g12_%s_default" % v)
++        for v in ("a", "b", "c"): phase("%s default" % v, "g12.py", v, "default", n, tag="g12_%s_default" % v)
+         lib.kill_n8n(); time.sleep(2); print("n8n limit 1 up:", lib.start_n8n(1), flush=True)
+-        py("g12.py", "d", "limit1", n, tag="g12_d_limit1")
+-        for kp in ("K1", "K2", "K3"): py("g3.py", "d", kp, k, tag="g3_d_" + kp)
++        phase("d limit1", "g12.py", "d", "limit1", n, tag="g12_d_limit1")
++        for kp in ("K1", "K2", "K3"): phase("d kill runs " + kp, "g3.py", "d", kp, k, tag="g3_d_" + kp)
+         lib.kill_n8n(); time.sleep(2); print("n8n default up:", lib.start_n8n(None), flush=True)
+         for v in ("a", "c", "b"):
+-            for kp in ("K1", "K2", "K3"): py("g3.py", v, kp, k, tag="g3_%s_%s" % (v, kp))
++            for kp in ("K1", "K2", "K3"): phase("%s kill runs %s" % (v, kp), "g3.py", v, kp, k, tag="g3_%s_%s" % (v, kp))
+         py("deploy3.py", tag="deploy3")
+-        for kp in ("K3", "K2", "K1"): py("g3e.py", kp, "5", tag="g3e_" + kp)
+-        py("g12e.py", tag="g12e")
++        for kp in ("K3", "K2", "K1"): phase("e kill runs " + kp, "g3e.py", kp, "5", tag="g3e_" + kp)
++        phase("e ten at once", "g12e.py", tag="g12e")
+         print("RUN ALL DONE", time.strftime("%H:%M:%SZ", time.gmtime()), flush=True)
+     finally:
+         try:
+diff --git a/summarise.py b/summarise.py
+index 881ffa1..3a433d2 100644
+--- a/summarise.py
++++ b/summarise.py
+@@ -54,11 +54,133 @@ def read(folder, name, ext):
+     return [json.loads(x) for x in p.read_text(encoding="utf-8").splitlines() if x.strip()]
+ 
+ 
+-def valid(r, variant):
++EMAIL_RE = re.compile(r'"email":\s*"([^"]+)"')  # one pattern for the sweeper count and the cross-check (optional space after the colon)
++
++
++def timed_out(r):
++    return any((r.get(k) or {}).get("timed_out") for k in ("settle1", "settle2", "wait_settled", "wait_after_retry"))
++
++
++def invalid_reason(r, variant):
++    """None for a valid ten-at-once run, else the reason. A run whose wait for quiet ran into its time limit is never valid."""
+     ov = r["overlap"]
++    if timed_out(r):
++        return "timeout"
++    if ov.get("note") == "missing times":
++        return "missing times"
++    if ov.get("n") != 10:
++        return "10 executions expected, %s listed" % ov.get("n")
+     if variant == "d":  # the serialised variant can never overlap: valid = ten sent together and ten executions listed
+-        return ov.get("n") == 10 and r.get("client_send_spread_ms") is not None and r["client_send_spread_ms"] < 100
+-    return ov.get("n") == 10 and ov.get("latest_start_before_earliest_stop") is True
++        if r.get("client_send_spread_ms") is None or r["client_send_spread_ms"] >= 100:
++            return "ten not sent within 100 ms"
++        return None
++    return None if ov.get("latest_start_before_earliest_stop") is True else "no overlap"
++
++
++def valid(r, variant):
++    return invalid_reason(r, variant) is None
++
++
++def kill_reasons(r):
++    """Why a kill run does not count (empty list: it counts)."""
++    out = []
++    if r.get("trigger_seen_after_s") is None:
++        out.append("trigger never seen")
++    if not r.get("killed_pid", True):
++        out.append("no process killed")
++    if r.get("n8n_restarted_ok") is False:
++        out.append("n8n did not restart")
++    if timed_out(r):
++        out.append("timeout")
++    return out
++
++
++def kill_valid(r):
++    return not kill_reasons(r)
++
++
++def read_invalid(folder, ext, prefix):
++    """Rows moved to published_run/invalid (a fresh run keeps everything in the main file): label -> count."""
++    d = folder / "invalid"
++    res = collections.Counter()
++    if d.is_dir():
++        for p in sorted(d.glob(prefix + "*." + ext)):
++            n = sum(1 for x in p.read_text(encoding="utf-8").splitlines() if x.strip())
++            res["kept in invalid/ (%s)" % (re.sub(r"[_-]+", " ", p.stem[len(prefix):]).strip() or "no reason given")] += n
++    return res
++
++
++def attempts_text(rows, reasons_fn, extra):
++    reasons = collections.Counter()
++    nvalid = 0
++    for r in rows:
++        rs = reasons_fn(r)
++        if rs:
++            reasons.update(rs)
++        else:
++            nvalid += 1
++    n_invalid = len(rows) - nvalid + sum(extra.values())
++    reasons.update(extra)
++    return "attempts %d, valid %d, invalid %d (%s)." % (nvalid + n_invalid, nvalid, n_invalid, ", ".join("%s x%d" % kv for kv in sorted(reasons.items())) or "none")
++
++
++def one(x):
++    return [x] if x else []
++
++
++def attempts_section(folder, ext, out):
++    out.append("## Attempts, valid runs and invalid reasons (nothing is dropped without being counted)\n")
++    out.append("An attempt is invalid when: no ten executions listed or no overlap between them (variant d: ten not sent within 100 ms), a wait for quiet ran into its time limit (timeout), or for a kill run the trigger was never seen, no process was killed or n8n did not restart.\n")
++    for v, setting in VARIANTS:
++        key = "g12_%s_%s" % (v, setting)
++        out.append("Set-up %s %s (ten at once): %s" % (v, setting, attempts_text(read(folder, key, ext), lambda r, v=v: one(invalid_reason(r, v)), read_invalid(folder, ext, key))))
++    for v, _ in VARIANTS:
++        key = "g3_%s" % v
++        out.append("Set-up %s (kill runs): %s" % (v, attempts_text(read(folder, key, ext), kill_reasons, read_invalid(folder, ext, key))))
++    for kp in E_POINTS:
++        key = "g3e_%s" % kp
++        out.append("Set-up e %s (kill runs): %s" % (kp, attempts_text(read(folder, key, ext), kill_reasons, read_invalid(folder, ext, key))))
++    out.append("Set-up e (ten at once): %s" % attempts_text(read(folder, "g12e", ext), lambda r: ["timeout"] if timed_out(r) else [], read_invalid(folder, ext, "g12e")))
++    out.append("")
++    out.append("The runs of one set-up are not independent: one n8n process, one database and one laptop serve all of them, one after another. The 95% intervals (Wilson) treat them as independent trials, so they are optimistic (too narrow); read them as a floor on the uncertainty, not as a promise.\n")
++
++
++def load_section(folder, ext, out):
++    rows = read(folder, "load", ext)
++    if not rows:
++        return
++    out.append("## Machine load before and after each set-up\n")
++    out.append("| set-up | when | CPU idle percent | free RAM MB |\n|---|---|---|---|")
++    for r in rows:
++        if "error" in r:
++            out.append("| %s | %s | n/a (%s) | n/a |" % (r["setup"], r["when"], r["error"]))
++        else:
++            out.append("| %s | %s | %.1f | %d |" % (r["setup"], r["when"], r["cpu_idle_pct"], r["free_ram_mb"]))
++    out.append("")
++
++
++def shortfalls(folder, ext, runs=20, kills=5, variants="abcd", with_e=True):
++    """Every set-up must hold the expected number of valid runs; a missing or short file is a shortfall, never silent."""
++    folder = pathlib.Path(folder)
++    bad = []
++    for v, setting in VARIANTS:
++        if v in variants:
++            n = sum(1 for r in read(folder, "g12_%s_%s" % (v, setting), ext) if valid(r, v))
++            if n != runs:
++                bad.append("g12 %s %s: expected %d valid runs, found %d" % (v, setting, runs, n))
++            for kp in POINTS:
++                m = sum(1 for r in read(folder, "g3_%s" % v, ext) if r["kill_point"] == kp and kill_valid(r))
++                if m != kills:
++                    bad.append("g3 %s %s: expected %d valid kill runs, found %d" % (v, kp, kills, m))
++    if with_e:
++        for kp in E_POINTS:
++            m = sum(1 for r in read(folder, "g3e_%s" % kp, ext) if kill_valid(r))
++            if m != kills:
++                bad.append("g3e %s: expected %d valid kill runs, found %d" % (kp, kills, m))
++        m = sum(1 for r in read(folder, "g12e", ext) if not timed_out(r))
++        if m != kills:
++            bad.append("g12e: expected %d valid runs, found %d" % (kills, m))
++    return bad
+ 
+ 
+ def dist(items):
+@@ -97,18 +219,19 @@ def g3_section(folder, ext, out):
+     for v, _ in VARIANTS:
+         rs = read(folder, "g3_%s" % v, ext)
+         out.append("### Variant %s\n" % v)
+-        out.append("| point | run | CRM / email at kill | after in-flight requests ended | list after restart | retry presses | final CRM / email | crashed entry visible |\n|---|---|---|---|---|---|---|---|")
++        out.append("| point | run | CRM / email at kill | after in-flight requests ended | list after restart | retry presses | final CRM / email | crashed entry visible | valid |\n|---|---|---|---|---|---|---|---|---|")
+         for r in rs:
+             a, b, c = r["counts_at_kill"], r["counts_after_inflight_settled"], r["final"]
+             lst = ", ".join("%s x%d" % kv for kv in sorted(r["exec_status_after_restart"].items())) or "empty"
+-            out.append("| %s | %d | %d / %d | %d / %d | %s | %d | %d / %d | %s |" % (
+-                r["kill_point"], r["run"], a["crm"], a["outbox"], b["crm"], b["outbox"], lst, r["retry_pressed_n"], c["crm"], c["outbox"], "yes" if visible(r) else "no"))
++            out.append("| %s | %d | %d / %d | %d / %d | %s | %d | %d / %d | %s | %s |" % (
++                r["kill_point"], r["run"], a["crm"], a["outbox"], b["crm"], b["outbox"], lst, r["retry_pressed_n"], c["crm"], c["outbox"], "yes" if visible(r) else "no",
++                "yes" if kill_valid(r) else "NO: " + ", ".join(kill_reasons(r))))
+         nokill = sum(1 for r in rs if "ConnectionResetError" not in r["client_replies_during_kill"])
+         out.append(chr(10) + "Kill runs where no client saw a connection reset (the kill may not have taken effect): %d of %d." % (nokill, len(rs)))
+         for kp, label in POINTS.items():
+-            s = [r for r in rs if r["kill_point"] == kp]
++            s = [r for r in rs if r["kill_point"] == kp and kill_valid(r)]
+             if s:
+-                out.append("\n%s, %s: %d runs, final (CRM, email) %s; crashed entry visible %d of %d." % (
++                out.append("\n%s, %s: %d valid runs, final (CRM, email) %s; crashed entry visible %d of %d." % (
+                     kp, label, len(s), dist((r["final"]["crm"], r["final"]["outbox"]) for r in s), sum(1 for r in s if visible(r)), len(s)))
+         out.append("")
+ 
+@@ -119,7 +242,7 @@ def sweeper_posts(folder, ext):
+     if p.exists():
+         for line in p.read_text(encoding="utf-8").splitlines():
+             r = json.loads(line)
+-            m = re.search(r'"email":"([^"]+)"', r["body"])
++            m = EMAIL_RE.search(r["body"])
+             if "sweeper" in r["body"] and m:
+                 posts[m.group(1)][0 if r["k"] == "outbox" else 1].append(r["t"])
+     return posts
+@@ -137,12 +260,14 @@ def e_section(folder, ext, out):
+         rs = read(folder, "g3e_%s" % kp, ext)
+         out.append("### %s: %s\n" % (kp, label))
+         out.append("Cells are CRM posts / email posts / database status.\n")
+-        out.append("| run | at kill | after in-flight settled | +5s | +15s | +25s | +40s | +60s | re-send job posts (email/CRM) | client replies |\n|---|---|---|---|---|---|---|---|---|---|")
++        out.append("| run | at kill | after in-flight settled | +5s | +15s | +25s | +40s | +60s | re-send job posts (email/CRM) | client replies | valid |\n|---|---|---|---|---|---|---|---|---|---|---|")
+         for r in rs:
+             s = r["samples"]
+             sp = sw[r["email"]]
+-            out.append("| %d | %s | %s | %s | %d/%d | %s |" % (r["run"], cell(r["at_kill"]), cell(r["after_inflight_settled"]), " | ".join(cell(x) for x in s),
+-                                                              len(sp[0]), len(sp[1]), replies(r["client_replies_during_kill"])))
++            out.append("| %d | %s | %s | %s | %d/%d | %s | %s |" % (r["run"], cell(r["at_kill"]), cell(r["after_inflight_settled"]), " | ".join(cell(x) for x in s),
++                                                              len(sp[0]), len(sp[1]), replies(r["client_replies_during_kill"]), "yes" if kill_valid(r) else "NO: " + ", ".join(kill_reasons(r))))
++            if not kill_valid(r):
++                continue
+             runs += 1
+             lost += s[-1]["db"] != "sent"
+             if kp != "K1":
+@@ -171,7 +296,7 @@ def crosscheck(folder, ext, out):
+     per = collections.defaultdict(lambda: [0, 0])
+     for line in p.read_text(encoding="utf-8").splitlines():
+         r = json.loads(line)
+-        m = re.search(r'"email":\s*"([^"]+)"', r["body"])
++        m = EMAIL_RE.search(r["body"])
+         if m:
+             per[m.group(1)][0 if r["k"] == "crm" else 1] += 1
+     same = diff = 0
+@@ -198,7 +323,7 @@ def headline(folder, ext, out):
+         added = sum(1 for r in rs if (r["replay_added"]["crm"], r["replay_added"]["outbox"]) != (0, 0))
+         out.append("* Variant %s, ten at once: %s ended with exactly 1 CRM row and 1 email; runs where the replay added posts: %d of %d." % (v, pct(ok, len(rs)), added, len(rs)))
+     for v, _ in VARIANTS:
+-        rs = read(folder, "g3_%s" % v, ext)
++        rs = [r for r in read(folder, "g3_%s" % v, ext) if kill_valid(r)]  # an invalid kill run (no trigger, no restart, timeout) is reported in the attempts section, not counted here
+         crm_first = [r for r in rs if r["kill_point"] == "K3"]
+         other = [r for r in rs if r["kill_point"] != "K3"]
+         nokill = sum(1 for r in rs if "ConnectionResetError" not in r["client_replies_during_kill"])
+@@ -213,6 +338,8 @@ def summarise(folder, ext="ndjson"):
+     folder = pathlib.Path(folder)
+     out = ["# Tables generated from the raw files (harness/summarise.py). Do not edit by hand.\n"]
+     headline(folder, ext, out)
++    attempts_section(folder, ext, out)
++    load_section(folder, ext, out)
+     g12_section(folder, ext, out)
+     g3_section(folder, ext, out)
+     e_section(folder, ext, out)
+@@ -225,9 +352,19 @@ if __name__ == "__main__":
+     ap.add_argument("folder")
+     ap.add_argument("--out")
+     ap.add_argument("--ext", default="ndjson")
++    ap.add_argument("--runs", type=int, default=20, help="valid ten-at-once runs expected per set-up (3 for a --smoke run)")
++    ap.add_argument("--kills", type=int, default=5, help="valid kill runs expected per kill point (3 for a --smoke run)")
++    ap.add_argument("--variants", default="abcd", help="variants that were run (b for a --smoke run)")
++    ap.add_argument("--no-e", action="store_true", help="variant e was not run (--smoke)")
+     a = ap.parse_args()
+     text = summarise(a.folder, a.ext)
++    short = shortfalls(a.folder, a.ext, a.runs, a.kills, a.variants, not a.no_e)
++    if short:
++        text += "## SHORTFALL (fewer valid runs than expected)\n\n" + "\n".join("* " + x for x in short) + "\n"
+     if a.out:
+         pathlib.Path(a.out).write_text(text, encoding="utf-8", newline="\n")
+     else:
+         sys.stdout.buffer.write(text.encode("utf-8"))
++    if short:
++        sys.stderr.write("SHORTFALL: %d set-ups have fewer valid runs than expected (see the end of the tables)\n" % len(short))
++        sys.exit(2)

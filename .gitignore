@@ -34,3 +34,5 @@ Thumbs.db
 *.env
 .coverage.*
 coverage.xml
+node_modules/
+.run/
