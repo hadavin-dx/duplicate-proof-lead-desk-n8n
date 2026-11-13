@@ -1566,8 +1566,9 @@ def test_a_lone_surrogate_is_a_plain_refusal_not_a_unicode_error(tmp_path: Path)
     UnicodeEncodeError. Windows can encode it, and then the call simply returns."""
     text = str(tmp_path) + "/a" + chr(0xD800) + "b.db"
     if os.name == "posix":
-        with pytest.raises(pc.PathRefused, match="not a valid file name"):
+        with pytest.raises(pc.PathRefused, match="not a valid file name") as refused:
             pc.readonly_sqlite_uri(text)
+        assert refused.value.__cause__ is None  # the encoding error (which holds the text) is not shown as the cause
     else:  # Windows may encode it: then the call returns; it must never raise anything but PathRefused
         try:
             pc.readonly_sqlite_uri(text)
