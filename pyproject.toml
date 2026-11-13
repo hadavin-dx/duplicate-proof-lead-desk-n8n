@@ -24,6 +24,10 @@ extend-exclude = [".venv", "data"]
 # S = flake8-bandit rules; PLR2004 = magic value used in a comparison (numbers belong in constants.py / Config).
 select = ["E", "F", "W", "I", "S", "PLR2004"]
 
+[tool.ruff.lint.isort]
+# demo_only/ is deleted in a client copy; without this line isort stops treating it as first-party and reports import-order errors in the tests
+known-first-party = ["demo_only"]
+
 [tool.ruff.lint.per-file-ignores]
 # Tests may use assert and literal numbers/addresses in assertions.
 "tests/**" = ["S101", "S105", "S106", "S311", "PLR2004"]
