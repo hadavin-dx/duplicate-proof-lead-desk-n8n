@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from support import REPO, lead
+from support import REPO, lead, start_serving, stop_serving
 
 from demo_only.fake_model_server import ModelState, make_model_server
 from lead_desk import live_claude as lc
@@ -46,15 +46,12 @@ class Model:
 @pytest.fixture
 def model() -> Iterator[Model]:
     srv, state = make_model_server(port=0, mode="ok", key=FAKE_KEY)
-    th = threading.Thread(target=srv.serve_forever, daemon=True)
-    th.start()
+    th = start_serving(srv)
     try:
         yield Model(state, f"http://127.0.0.1:{srv.server_address[1]}")
     finally:
         state.stop.set()
-        srv.shutdown()
-        srv.server_close()
-        th.join(timeout=5)
+        stop_serving(srv, th)
 
 
 def settings(tmp_path: Path, m: Model, **over: Any) -> LiveSettings:

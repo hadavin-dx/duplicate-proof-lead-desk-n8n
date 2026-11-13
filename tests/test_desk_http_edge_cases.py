@@ -613,6 +613,7 @@ def make_book_at_schema_version_1(tmp: Path, leads: int = 0) -> Path:
         ("followups", "crm_done"),
         ("followups", "auto_attempts"),
         ("followups", "ambiguous_prior"),
+        ("followups", "send_started"),
     ):
         if column in {r[1] for r in con.execute(f"PRAGMA table_info({table})")}:
             con.execute(f"ALTER TABLE {table} DROP COLUMN {column}")

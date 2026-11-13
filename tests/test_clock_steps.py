@@ -39,6 +39,9 @@ FOLDERS = ("src", "scripts", "tools", "load_tools", "demo_only", "tests")
 WALL = re.compile(
     r"\btime\.time(_ns)?\b|\bfrom\s+time\s+import\b[^\n]*\btime(_ns)?\b|\bdatetime\.(now|utcnow|today)\("
     r"|\bdate\.today\(|\b(gm|local)time\(|\btime\.ctime\(|\bformatdate\(|\bst_[mca]time(_ns)?\b|\bget[mca]time\("
+    # the module under another name (`import time as wall`, `from datetime import datetime as D`): the lines above would
+    # not see `wall.time()`, so the renaming itself is flagged (nobody in this repository renames these modules)
+    r"|\bimport\s+(time|datetime)\s+as\b|\bfrom\s+datetime\s+import\b[^\n]*\bas\b"
 )
 
 
@@ -129,13 +132,25 @@ def test_wall_clock_is_only_used_for_calendar_stamps() -> None:
         "n = os.path.get" + "mtime(p)",
         "s = time.gm" + "time()",
         "m['Date'] = format" + "date()",
+        "import time" + " as wall",
+        "import datetime" + " as dt",
+        "from date" + "time import date, datetime as D",
     ],
 )
 def test_the_wall_guard_sees_every_way_to_read_the_calendar(line: str) -> None:
     assert WALL.search(line), line
 
 
-@pytest.mark.parametrize("line", ["t = time.monotonic()", "time.sleep(1)", "from time import sleep", "x = runtime"])
+@pytest.mark.parametrize(
+    "line",
+    [
+        "t = time.monotonic()",
+        "time.sleep(1)",
+        "from time import sleep",
+        "x = runtime",
+        "from datetime import timedelta",
+    ],
+)
 def test_the_wall_guard_leaves_the_monotonic_clock_alone(line: str) -> None:
     assert not WALL.search(line), line
 

@@ -116,8 +116,13 @@
       }
       function onFirst(d, status) {
         if (status === 200 && d && Array.isArray(d.items)) {
+          if ((extra.length || loading) && first) { // older rows are loaded, or on their way (the click on Load more was made with the old cursor): keep the rows that new requests pushed out of page one, or they would fall between the pages
+            var inNew = {};
+            d.items.forEach(function (r) { inNew[r.request_id + '|' + r.received_at] = 1; });
+            d = Object.assign({}, d, { items: d.items.concat(first.items.filter(function (r) { return !inNew[r.request_id + '|' + r.received_at]; })) });
+          }
           first = d; failure = null;
-          if (!extra.length) cursor = d.next;
+          if (!extra.length && !loading) cursor = d.next; // while older rows are loading the answer brings the cursor
         } else { failure = { status: status }; }
         render(false);
       }

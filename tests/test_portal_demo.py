@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 
 import pytest
 from conftest import Env
-from support import HOST, REPO, Rig, free_port, wait_until
+from support import HOST, REPO, Rig, free_port, start_serving, stop_serving, wait_until
 
 from lead_desk.adapters import HttpCrm, HttpOutbox
 from lead_desk.config import Config
@@ -46,7 +46,10 @@ def _demo_module(name: str) -> Any:
     try:
         return importlib.import_module(name)
     except ModuleNotFoundError as e:
-        if e.name is not None and e.name.split(".")[0] == "demo_only":
+        if e.name in (
+            "demo_only",
+            name,
+        ):  # the folder (or this very module) is gone; a missing import INSIDE it is an error
             pytest.skip(f"{e.name} is not there: demo_only/ was removed", allow_module_level=True)
         raise
 
@@ -209,14 +212,11 @@ class Stub:
 
         self.srv = ThreadingHTTPServer((HOST, 0), H)
         self.srv.daemon_threads = True
-        self.thread = threading.Thread(target=self.srv.serve_forever, daemon=True)
-        self.thread.start()
+        self.thread = start_serving(self.srv)
         self.url = f"http://{HOST}:{self.srv.server_address[1]}"
 
     def stop(self) -> None:
-        self.srv.shutdown()
-        self.srv.server_close()
-        self.thread.join(timeout=5)
+        stop_serving(self.srv, self.thread)
 
 
 def send(h: BaseHTTPRequestHandler, status: int, obj: Any, headers: dict[str, str] | None = None) -> None:

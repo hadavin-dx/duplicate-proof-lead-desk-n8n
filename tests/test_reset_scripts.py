@@ -8,6 +8,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -47,8 +48,8 @@ def test_reset_refuses_a_database_outside_the_data_folder(tmp_path: Path) -> Non
 
 
 def test_reset_still_deletes_a_database_inside_the_data_folder() -> None:
-    folder = REPO / "data" / "reset-test"
-    folder.mkdir(parents=True, exist_ok=True)
+    (REPO / "data").mkdir(exist_ok=True)
+    folder = Path(tempfile.mkdtemp(prefix="reset-test-", dir=REPO / "data"))  # a fresh folder: only it is removed
     db = folder / "desk.sqlite3"
     db.write_text("x", encoding="utf-8")
     try:
@@ -62,8 +63,10 @@ def test_reset_still_deletes_a_database_inside_the_data_folder() -> None:
 # -- the reset never deletes the lead book while the desk may still be using it
 @pytest.fixture
 def book() -> Any:
-    folder = REPO / "data" / "reset-guard-test"
-    folder.mkdir(parents=True, exist_ok=True)
+    (REPO / "data").mkdir(exist_ok=True)
+    folder = Path(
+        tempfile.mkdtemp(prefix="reset-guard-", dir=REPO / "data")
+    )  # a fresh folder: nothing else is ever removed
     db = folder / "desk.sqlite3"
     db.write_text("keep me", encoding="utf-8")
     (folder / "desk.log").write_text("keep me", encoding="utf-8")

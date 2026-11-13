@@ -7,7 +7,6 @@ import errno
 import logging
 import socket
 import sqlite3
-import threading
 import time
 import urllib.error
 from contextlib import contextmanager
@@ -15,7 +14,7 @@ from dataclasses import replace
 from typing import Any
 
 import pytest
-from support import HOST, is_write, lead, sql_exec
+from support import HOST, is_write, lead, sql_exec, start_serving, stop_serving
 
 from demo_only.fakes import BlindOutbox, RecordedQualifier
 from lead_desk import adapters, constants, db, gate, server
@@ -372,16 +371,13 @@ def test_accept_pauses_on_no_file_handle(env, monkeypatch) -> None:
 
     monkeypatch.setattr("socketserver.TCPServer.get_request", refuse)
     host, port = srv.server_address[0], srv.server_address[1]
-    thread = threading.Thread(target=srv.serve_forever, daemon=True)
-    thread.start()
+    thread = start_serving(srv)
     try:
         client = socket.create_connection((str(host), int(port)), timeout=5)  # stays in the listen queue, unaccepted
         time.sleep(0.5)
         client.close()
     finally:
-        srv.shutdown()
-        srv.server_close()
-        thread.join(timeout=5)
+        stop_serving(srv, thread)
     assert 1 <= calls["n"] <= 25, calls  # a spinning loop makes thousands of calls in half a second
 
 

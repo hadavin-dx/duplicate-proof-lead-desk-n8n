@@ -521,8 +521,8 @@ def _cast_aliases(tree: ast.AST) -> set[str]:
                     if a.name in CASTS and (a.asname or a.name) not in aliases and a.asname:
                         aliases.add(a.asname)
                         changed = True
-            if isinstance(n, ast.Assign) and _is_cast_expr(n.value, aliases):
-                for tgt in n.targets:
+            if isinstance(n, ast.Assign | ast.AnnAssign) and n.value is not None and _is_cast_expr(n.value, aliases):
+                for tgt in n.targets if isinstance(n, ast.Assign) else [n.target]:  # `conv: Any = int` too
                     if isinstance(tgt, ast.Name) and tgt.id not in aliases:
                         aliases.add(tgt.id)
                         changed = True
@@ -679,6 +679,7 @@ EVASIVE = {
         'class Holder(object):\n    def a(self):\n        self.raw = os.environ["X"]\n    def b(self):\n        return int(self.raw)'
     ),
     "cast alias": '_i = int\nx = _i(os.environ["X"])',
+    "annotated cast alias": 'conv: Any = int\nx = conv(os.environ["X"])',
     "Decimal imported as D": 'from decimal import Decimal as D\nx = D(os.environ["X"])',
     "functools.partial": 'import functools\nconv = functools.partial(int)\nx = conv(os.environ["X"])',
     "unannotated mapping, literal key": 'def f(cfg):\n    return int(cfg["DESK_PORT"])',
@@ -746,8 +747,8 @@ def _unchecked_calls(source: str, rel: str = "x.py") -> list[int]:
     while changed:  # an assignment alias: alias = env_number
         changed = False
         for n in ast.walk(tree):
-            if isinstance(n, ast.Assign) and refers(n.value):
-                for tgt in n.targets:
+            if isinstance(n, ast.Assign | ast.AnnAssign) and n.value is not None and refers(n.value):
+                for tgt in n.targets if isinstance(n, ast.Assign) else [n.target]:  # `parse: Any = env_number` too
                     if isinstance(tgt, ast.Name) and tgt.id not in names:
                         names.add(tgt.id)
                         changed = True
@@ -795,6 +796,7 @@ GUARD_EVASIVE = {
     "module level call": 'X = env_number(ENV, "X", int)',
     "the number helper without high": 'def f(env):\n    return number("X", env, int, 3)',
     "assignment alias": 'alias = env_number\ndef f(e):\n    return alias(e, "X", int)',
+    "annotated assignment alias": 'parse: Any = env_number\ndef f(e):\n    return parse(e, "X", int)',
     "functools.partial of env_number": 'import functools\ng = functools.partial(env_number, ENV, "X", int)',
     "attribute on an imported module alias": (
         'import lead_desk.envnum as m\ndef f(e):\n    return m.env_number(e, "X", int)'

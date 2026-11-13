@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import faulthandler
 import itertools
 import json
 import os
@@ -15,12 +16,12 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from demo_only.fakes import BlindOutbox, FakeCrm, KeyedOutbox, RecordedQualifier
 from lead_desk.adapters import CrmNothingStored
@@ -427,14 +428,116 @@ class StubSender:
         self.behaviour, self.status, self.body = behaviour, status, body
         self.srv = ThreadingHTTPServer((HOST, 0), H)
         self.srv.daemon_threads = True
-        self.thread = threading.Thread(target=self.srv.serve_forever, daemon=True)
-        self.thread.start()
+        self.thread = start_serving(self.srv)
         self.url = f"http://{HOST}:{self.srv.server_address[1]}"
 
     def stop(self) -> None:
-        self.srv.shutdown()
-        self.srv.server_close()
-        self.thread.join(timeout=5)
+        stop_serving(self.srv, self.thread, "stub server")
+
+
+# A plain stub server stops in milliseconds, so 20 s is far beyond any real stop: a server still running then is
+# stuck, and the guard's job is to catch a wait with NO end, not a slow one. A stop of a PRODUCT server (the desk's
+# serve_in_thread.stop) is allowed longer: it ends with thread.join(timeout=REQUEST_TIMEOUT_SECONDS) (30 s), so a
+# legitimate stop may last that long; conftest.py gives those stops twice that value.
+STOP_SECONDS = 20.0
+_POLL_SECONDS = 0.05  # serve_forever polls for a stop request this often (the library default is 0.5 s)
+
+
+class ServerDidNotStop(AssertionError):
+    """A test server did not stop in time (a deadlock in the server or a stuck request thread)."""
+
+
+def start_serving(srv: Any, *, ready_within: float = WAIT_SECONDS) -> threading.Thread:
+    """Run srv.serve_forever in a daemon thread and return only once its loop has really started.
+
+    A stop with no time limit (the standard library's shutdown()) can stall a whole test run; this helper and
+    stop_serving() bound it and print the stacks of all threads. The cause of the one suspected stall in an earlier
+    full run is UNPROVEN (that run was most probably only slow, or its buffered progress file looked stale): this is
+    a diagnostic guard, not a fix of a known cause. The loop calls service_actions() after every poll, so the first
+    call proves it is serving. If the loop does not start, the listening socket is closed before the error is raised,
+    so a failed start leaks no socket."""
+    serving = threading.Event()
+    inner = srv.service_actions
+
+    def service_actions() -> None:
+        serving.set()
+        inner()
+
+    srv.service_actions = service_actions
+    thread = threading.Thread(target=srv.serve_forever, args=(_POLL_SECONDS,), daemon=True, name="test-serve")
+    srv.serve_thread = thread
+    thread.start()
+    if not serving.wait(ready_within):
+        try:
+            srv.server_close()
+        except Exception:  # noqa: BLE001, S110 (the start error below is the one to report)
+            pass
+        raise ServerDidNotStop(f"the server loop did not start within {ready_within} s (alive={thread.is_alive()})")
+    return thread
+
+
+def _dump_all_stacks() -> None:
+    """Print the stack of every thread. Under `--capture=sys` or capsys, sys.stderr has no file number and
+    faulthandler refuses it: fall back to the process's own stderr, and never let the dump hide ServerDidNotStop."""
+    for target in (sys.stderr, sys.__stderr__):
+        try:
+            faulthandler.dump_traceback(file=cast(Any, target), all_threads=True)
+            return
+        except Exception:  # noqa: BLE001, S112 (try the next target)
+            continue
+
+
+def stop_within(stop: Callable[[], object], what: str = "server", *, seconds: float = STOP_SECONDS) -> None:
+    """Call stop() (a shutdown, a server_close, a join) on a helper thread and fail with a message, and with the
+    stack of every thread on stderr, when it has not returned after `seconds`; the test run goes on."""
+    done = threading.Event()
+    problem: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            stop()
+        except BaseException as e:  # noqa: BLE001 (handed to the calling thread below)
+            problem.append(e)
+        finally:
+            done.set()
+
+    threading.Thread(target=run, daemon=True, name=f"stop-{what}").start()
+    if not done.wait(seconds):
+        _dump_all_stacks()
+        raise ServerDidNotStop(f"{what} did not stop within {seconds} s")
+    if problem:
+        raise problem[0]
+
+
+def stop_serving(
+    srv: Any, thread: threading.Thread | None = None, what: str = "server", *, seconds: float = STOP_SECONDS
+) -> None:
+    """Stop a server started with start_serving (or any serve_forever thread): shutdown, close, join, all bounded."""
+    thread = thread or srv.serve_thread
+
+    def stop() -> None:
+        srv.shutdown()
+        srv.server_close()
+        thread.join(timeout=seconds)
+        if thread.is_alive():
+            raise ServerDidNotStop(f"{what}: the serve_forever thread is still alive after the shutdown")
+
+    stop_within(stop, what, seconds=seconds)
+
+
+def stop_all(servers: Iterable[Any], what: str = "server", *, seconds: float = STOP_SECONDS) -> None:
+    """Stop every server in `servers` even when an earlier stop fails; then raise: several stuck servers as one
+    ServerDidNotStop that names them all, otherwise the first error as it is."""
+    problems: list[BaseException] = []
+    for srv in servers:
+        try:
+            stop_serving(srv, what=what, seconds=seconds)
+        except Exception as e:  # noqa: BLE001 (collected, raised below)
+            problems.append(e)
+    if problems and all(isinstance(p, ServerDidNotStop) for p in problems) and len(problems) > 1:
+        raise ServerDidNotStop("; ".join(str(p) for p in problems))
+    if problems:
+        raise problems[0]
 
 
 # -- subprocess helpers

@@ -53,8 +53,12 @@ def test_head_options_and_malformed_requests_get_json(env) -> None:
     assert (status, out) == (400, {"error": "bad_request"})
 
 
-def test_long_lowercase_email_is_review(env) -> None:
-    """One capital letter with a dot (U+0130) becomes two characters in lower case: 134 typed, 268 as the key."""
+def test_long_lowercase_email_is_review(env, monkeypatch) -> None:
+    """One capital letter with a dot (U+0130) becomes two characters in lower case: 134 typed, 268 as the key. The
+    ASCII-apart check would refuse U+0130 first: it is switched off here, so only the length check can catch it."""
+    from lead_desk import identity
+
+    monkeypatch.setattr(identity, "_lower_keeps_ascii_apart", lambda e: True)
     rig = env.rig()
     base = env.serve(rig)
     email = "İ" * 130 + "@example.test"

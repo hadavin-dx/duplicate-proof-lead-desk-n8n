@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from support import FakeClock
+from support import FakeClock, start_serving, stop_serving
 
 from demo_only import fake_model_server
 from lead_desk.constants import FOLLOWUP_BODY_TEMPLATE, FOLLOWUP_SUBJECT_TEMPLATE
@@ -443,10 +443,9 @@ class _Desk(BaseHTTPRequestHandler):
 def desk_url() -> Any:
     _Desk.seen = {}
     srv = ThreadingHTTPServer(("127.0.0.1", 0), _Desk)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    start_serving(srv)
     yield f"http://127.0.0.1:{srv.server_address[1]}"
-    srv.shutdown()
-    srv.server_close()
+    stop_serving(srv)
 
 
 def test_scenario_parsing() -> None:
@@ -528,13 +527,12 @@ class _Flaky:
                 pass
 
         self._srv = ThreadingHTTPServer(("127.0.0.1", self.port), H)
-        threading.Thread(target=self._srv.serve_forever, daemon=True).start()
+        start_serving(self._srv)
 
     def close(self) -> None:
         self._timer.cancel()
         if self._srv:
-            self._srv.shutdown()
-            self._srv.server_close()
+            stop_serving(self._srv)
 
 
 def _one_item() -> dict[str, Any]:
@@ -660,12 +658,11 @@ def test_burst_run_logs_every_request(desk_url: str, tmp_path: Path) -> None:
 def model(tmp_path: Path) -> Any:
     srv, state = fake_model_server.make_model_server(port=0, call_log=tmp_path / "calls.jsonl")
     state.slow_seconds, state.hang_seconds = 0.4, 3.0
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    start_serving(srv)
     state.url = f"http://127.0.0.1:{srv.server_address[1]}"  # type: ignore[attr-defined]
     yield state
     state.stop.set()
-    srv.shutdown()
-    srv.server_close()
+    stop_serving(srv)
 
 
 def ask(model: Any, lead_id: str, timeout: float = 2.0) -> tuple[int, bytes]:
@@ -674,8 +671,9 @@ def ask(model: Any, lead_id: str, timeout: float = 2.0) -> tuple[int, bytes]:
     req = urllib.request.Request(  # noqa: S310
         model.url + "/v1/messages", json.dumps(body).encode(), {"x-api-key": "fake", "Content-Type": "application/json"}
     )
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # loopback: never through HTTP_PROXY
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310
+        with opener.open(req, timeout=timeout) as r:  # noqa: S310
             return r.status, r.read()
     except urllib.error.HTTPError as e:
         return e.code, e.read()

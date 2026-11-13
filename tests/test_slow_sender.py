@@ -7,6 +7,7 @@ from __future__ import annotations
 import errno
 import json
 import logging
+import select
 import socket
 import socketserver
 import threading
@@ -16,7 +17,7 @@ from dataclasses import replace
 from typing import Any
 
 import pytest
-from support import HOST, BlockAt, addr, call, lead, post_lead, reset_on_close, wait_until
+from support import HOST, BlockAt, addr, call, lead, post_lead, reset_on_close, start_serving, stop_serving, wait_until
 
 from lead_desk import constants, server
 from lead_desk.hooks import Hooks
@@ -129,7 +130,6 @@ class Live:
         self.rig = env.rig(hooks=hooks)
         cfg = replace(self.rig.desk.config, port=0)
         self.srv = server.make_server(self.rig.desk, cfg)
-        self.thread = threading.Thread(target=self.srv.serve_forever, daemon=True)
         self.taken = 0  # places handed out so far (a count that never goes down)
         real_take = self.srv._take_slot  # type: ignore[attr-defined]
 
@@ -139,7 +139,7 @@ class Live:
             return slot
 
         self.srv._take_slot = counting_take  # type: ignore[attr-defined]
-        self.thread.start()
+        self.thread = start_serving(self.srv)
         host, port = self.srv.server_address[0], self.srv.server_address[1]
         self.base = f"http://{host}:{port}"
 
@@ -188,8 +188,7 @@ class Live:
         return int(self.srv.handler_threads())  # type: ignore[attr-defined]
 
     def stop(self) -> None:
-        self.srv.shutdown()
-        self.srv.server_close()
+        stop_serving(self.srv)
 
 
 @pytest.fixture
@@ -334,7 +333,8 @@ def test_busy_503_trickler_no_stall(live, monkeypatch) -> None:
     th = threading.Thread(target=trickle, daemon=True)
     th.start()
     try:
-        time.sleep(0.1)  # the loop has taken the trickler first
+        # the loop has taken the trickler first: its refusal (the 503 answer) is readable on the trickler's socket
+        assert select.select([trickler], [], [], 5)[0], "the desk never answered the trickler"
         t0 = time.monotonic()
         assert call(live.base, "GET", "/counts") == (503, BUSY_REPLY)
         assert time.monotonic() - t0 < 0.4

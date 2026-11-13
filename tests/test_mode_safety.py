@@ -10,12 +10,13 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import pytest
-from support import DEMO_LEADFLOW, REPO, KeyedOutbox, build_rig, call, lead
+from support import DEMO_LEADFLOW, REPO, KeyedOutbox, build_rig, call, lead, stop_within
 from test_portal_api import fresh, get
 
 from demo_only import fake_hubspot as fh
@@ -88,7 +89,7 @@ def test_data_map_matches_what_hubspot_put_really_sends(tmp_path: Path) -> None:
         crm.put("L-1", {**record, "source": "form", "ai_label": "hot"})
         (row,) = state.contacts.values()
     finally:
-        fh.stop(srv, th, state)
+        stop_within(lambda: fh.stop(srv, th, state), "fake HubSpot server")
     sent = set(row["properties"])
     assert sent == {"email", "hadavin_lead_id", "firstname", "lastname", "company"}
     from lead_desk import portal_api
@@ -330,8 +331,8 @@ def test_the_owner_note_names_the_real_reason_not_the_demo_crm() -> None:
 # -- the reset script never deletes the book when it cannot tell which program a process id belongs to
 @pytest.mark.skipif(sys.platform == "win32", reason="reset.sh is the non-Windows script")
 def test_reset_sh_refuses_when_ps_is_missing(tmp_path: Path) -> None:
-    folder = REPO / "data" / "reset-no-ps"
-    folder.mkdir(parents=True, exist_ok=True)
+    (REPO / "data").mkdir(exist_ok=True)
+    folder = Path(tempfile.mkdtemp(prefix="reset-no-ps-", dir=REPO / "data"))  # a fresh folder: only it is removed
     db = folder / "desk.sqlite3"
     db.write_text("keep me", encoding="utf-8")
     (folder / "desk.pid").write_text("1", encoding="utf-8")

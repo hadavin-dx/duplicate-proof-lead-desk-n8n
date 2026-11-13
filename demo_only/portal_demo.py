@@ -272,10 +272,19 @@ class PortalDemo:
         cfg = self._desk.config
         if cfg.port == 0:
             return None
-        host = WILDCARD_BINDS.get(cfg.bind, cfg.bind)
+        return self._url_for(cfg.bind, cfg.port)
+
+    @staticmethod
+    def _url_for(bind: str, port: int) -> str:
+        host = WILDCARD_BINDS.get(bind, bind)
         if ":" in host and not host.startswith("["):
             host = f"[{host}]"
-        return f"http://{host}:{cfg.port}"
+        return f"http://{host}:{port}"
+
+    def set_bound_address(self, bind: str, port: int) -> None:
+        """Called by the server once it is bound: with a configured port 0 the real port is only known now."""
+        if self.desk_url is None and port:
+            self.desk_url = self._url_for(bind, port)
 
     # -- entry point
     def handle(self, method: str, path: str, body: bytes) -> tuple[int, Any]:

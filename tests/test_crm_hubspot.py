@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import threading
 import time
 from collections.abc import Iterator
@@ -11,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from support import HOST
+from support import HOST, stop_within
 
 from demo_only import fake_hubspot as fh
 from lead_desk.adapters import CrmError, CrmNothingStored, HttpCrm
@@ -57,7 +58,7 @@ class Rig:
         return HubspotCrm(HubspotSettings(**(s | kw)))
 
     def stop(self) -> None:
-        fh.stop(self.srv, self.th, self.state)
+        stop_within(lambda: fh.stop(self.srv, self.th, self.state), "fake HubSpot server")
 
 
 @pytest.fixture
@@ -226,6 +227,26 @@ def test_not_reached_is_stored_nothing(tmp_path: Path) -> None:
         r.crm(timeout_seconds=6.0).put("L-1", REC)  # a closed port can be refused slowly on some systems
 
 
+def test_a_rejected_call_still_gets_its_answer_when_the_body_arrives_after_the_close(rig: Rig) -> None:
+    """http.client sends the headers first, the body after. The fake answers a rejected call (401) at once and closes;
+    if the body is then still unread, the system resets the connection and the client loses the answer (Windows:
+    ConnectionAbortedError). The fake reads the body before it answers. Here the body is sent late on purpose."""
+    body = b'{"properties":{"email":"a@example.test"}}' * 30
+    head = (
+        "POST /crm/v3/objects/contacts HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer wrong\r\n"
+        f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n"
+    ).encode()
+    with socket.create_connection(rig.srv.server_address[:2], timeout=5) as c:
+        c.sendall(head)
+        time.sleep(0.3)  # the fake has answered and closed by now
+        try:
+            c.sendall(body)
+        except OSError:
+            pass  # the reset can already show here; the answer must still be readable below
+        time.sleep(0.3)
+        assert c.recv(200).startswith(b"HTTP/1.1 401")
+
+
 def test_call_cap_stops_before_the_network(rig: Rig) -> None:
     c = rig.crm(max_calls=1)
     c.put("L-1", REC)
@@ -345,7 +366,7 @@ def test_a_redirect_to_another_host_is_never_followed_and_the_key_never_leaves(r
         assert other.calls == [] and other.auth_seen == []  # the other host saw no request, so no Authorization
         assert len(rig.state.calls) == 1  # asked once, not retried
     finally:
-        fh.stop(srv, th, other)
+        stop_within(lambda: fh.stop(srv, th, other), "fake HubSpot server")
 
 
 def test_rotated_key_never_appears_in_errors_or_logs(rig: Rig, caplog: pytest.LogCaptureFixture) -> None:

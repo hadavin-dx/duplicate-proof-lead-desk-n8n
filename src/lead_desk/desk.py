@@ -306,6 +306,21 @@ class Reply:
     drive_lead_id: str | None = None  # set when the caller must now run the follow-up
 
 
+MEMORY_BOOK_PROBLEM = "the lead book must be a file: ':memory:' is empty for every thread but the first"
+
+
+def book_problem(db_path: Path | str) -> str | None:
+    """Why this lead-book path is refused (None: it is fine). A module-level function (not a `Desk` member) so that
+    `main` can call it by its own name: a test or caller that replaces `server.Desk` cannot take the check away.
+    `main` runs it BEFORE the lock step (the lock file is named after the book, so a refusal after it would leave
+    `<name>.lock` behind) and the desk repeats it when it is built. `Path("")` is "." so only this spelling can name
+    a private memory book. (A `file:` name is NOT refused: the desk resolves every other name to an absolute path
+    before SQLite sees it, so `file::memory:` is a plain file called that, never a memory book.)"""
+    if str(db_path) == ":memory:":
+        return MEMORY_BOOK_PROBLEM
+    return None
+
+
 class Desk:
     def __init__(
         self,
@@ -354,15 +369,18 @@ class Desk:
         self._tagged: dict[tuple[str, str], int] = {}  # (kind, lead id) -> workers still running for that lead
         self._busy_logged: set[str] = set()  # kinds whose give-back burst has been logged (cleared when a slot frees)
         self._closed_logged: set[str] = set()  # kinds whose "every slot is hung" error has been logged
+        self._mirror_busy: dict[str, tuple[int, int]] = {}  # lead id -> (stage rank, refusals in a row)
         self._mirror_not_before = _MirrorWait()  # lead id -> (monotonic time, stage rank) the copy waits until
         self._nudge_pause_until = 0.0  # monotonic time before which the reminder part claims nothing (memory only)
         self._rejected = 0
         self._rejected_lock = threading.Lock()
         self._inflight = FairSemaphore(INFLIGHT_MAX)
         self._drives = FairSemaphore(DRIVE_MAX)
-        db_text = str(config.db_path)
+        db_text = str(config.db_path)  # (str(Path("")) is ".", so only ":memory:" can name a private book)
+        if (problem := book_problem(db_text)) is not None:  # a private memory book is empty per thread
+            raise DeskSettingRefused(problem)
         # resolved ONCE here: a later chdir cannot send a new thread's connection to another file
-        self._db_path: Path | str = db_text if db_text in ("", ":memory:") else Path(db_text).resolve()
+        self._db_path: Path | str = Path(db_text).resolve()
         self._gate = gate_for(self._db_path)  # one write line per lead book (not re-entrant, see gate.py)
         self._decide_failures: dict[int, int] = {}  # receipt id -> consecutive non-busy decide failures (in memory)
         self._decide_lock = threading.Lock()
@@ -771,7 +789,7 @@ class Desk:
             )
             .fetchall()
         )
-        for lead_id, email_key, owner_id, step, rank_sent, _tries_before in rows:
+        for lead_id, email_key, owner_id, step, rank_sent, tries_before in rows:
             if self._stopping() or time.monotonic() - started >= MIRROR_PASS_SECONDS:
                 return
             owner_sent = crm_owner_of.get(owner_id, "") if owner_id in json.loads(copyable) else ""
@@ -785,10 +803,30 @@ class Desk:
                     self._call_deadline(),
                     lambda: CrmTimeout("no answer in time"),
                     tag=f"mirror:{lead_id}",
+                    # Always exclusive, keyed CRM or not: a PATCH of a newer stage is order-sensitive on any CRM, so an
+                    # abandoned older call that may still land must not be overtaken by it (asking again is NOT harmless
+                    # here, unlike a keyed put).
+                    exclusive=True,
                 )
             except AdapterBusy:
-                return  # nothing was asked and nothing is counted
+                with self._worker_lock:
+                    same_lead = self._tagged.get(("crm", f"mirror:{lead_id}"), 0) > 0
+                if not same_lead:
+                    return  # the crm worker cap: nothing was asked, nothing is counted, the pass ends
+                # THIS lead's older call is still running (abandoned): nothing was asked and no try is charged, but
+                # the lead waits like a failed one, so it leaves the selection and the leads behind it are copied in
+                # this same pass. It is tried again when the wait is over (and goes on only once the old call ended).
+                # The wait grows with every refusal in a row (10, 60, 180, 420 s ...), so a call that hangs for good is
+                # looked at ever less often; a refusal is not a try, so the count is kept in memory only.
+                seen_rank, seen = self._mirror_busy.get(lead_id, (rank_sent, 0))
+                busy = seen + 1 if seen_rank == rank_sent else 1  # a lead that moved stage starts the waits afresh
+                self._mirror_busy[lead_id] = (rank_sent, busy)
+                step_i = min(max(tries_before, 1) - 1 + busy - 1, len(MIRROR_RETRY_WAIT_SECONDS) - 1)
+                wait = MIRROR_RETRY_WAIT_SECONDS[step_i]
+                self._mirror_not_before.set(lead_id, time.monotonic() + wait, rank_sent)
+                continue
             except Exception as e:  # noqa: BLE001 - one try used; the part stops for this pass
+                self._mirror_busy.pop(lead_id, None)
                 error = type(e).__name__
 
                 tries_now: list[
@@ -822,6 +860,8 @@ class Desk:
                 else:
                     self._mirror_not_before.clear(lead_id)
                 return
+
+            self._mirror_busy.pop(lead_id, None)  # the call went through: the refusals in a row start afresh
 
             def copied(lead_id: str = lead_id, owner_sent: str = owner_sent, rank_sent: int = rank_sent) -> int:
                 with self._write(self._conn()):

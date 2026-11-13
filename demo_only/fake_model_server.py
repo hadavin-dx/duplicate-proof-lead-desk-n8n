@@ -31,6 +31,9 @@ from typing import Any
 MODES = ("ok", "mixed", "slow", "timeout", "r429", "malformed", "refusal", "r5xx", "badlabel", "drip")
 ALIASES = {"rate_limit": "r429", "malformed_json": "malformed", "malformed_label": "badlabel", "server_error": "r5xx"}
 CYCLE = ("hot", "warm", "cold")
+MAX_CONTROL_SECONDS = (
+    86_400.0  # the longest slow/hang a control call may ask for (Event.wait(inf) raises OverflowError)
+)
 FAKE_IN_TOKENS = 40
 FAKE_OUT_TOKENS = 2
 LEAD_ID_LINE = re.compile(r"^lead id: (.*)$", re.MULTILINE)
@@ -70,7 +73,8 @@ class ModelState:
             try:
                 text = self.control_file.read_text(encoding="utf-8").strip()
                 word = json.loads(text).get("mode") if text.startswith("{") else text
-                word = ALIASES.get(word, word)
+                if isinstance(word, str):  # {"mode": []} is JSON but not a mode word
+                    word = ALIASES.get(word, word)
                 if word in MODES:
                     return str(word)
             except (OSError, ValueError, AttributeError):
@@ -127,16 +131,28 @@ def _handler(state: ModelState) -> type[BaseHTTPRequestHandler]:
             n = int(self.headers.get("Content-Length") or 0)
             raw = self.rfile.read(n)
             if self.path == "/control":
-                obj = json.loads(raw or b"{}")
-                if "mode" in obj:
+                try:
+                    obj = json.loads(raw or b"{}")
+                except ValueError:
+                    obj = None
+                if not isinstance(obj, dict):  # a list, a string, a number or no JSON at all
+                    self._send(400, b"{}")
+                    return
+                if isinstance(obj.get("mode"), str):
                     obj["mode"] = ALIASES.get(obj["mode"], obj["mode"])
+                keys = [k for k in ("mode", "label", "slow_seconds", "hang_seconds", "retry_after") if k in obj]
+                for k in keys:  # the whole body is checked first: one bad key changes nothing
+                    seconds_bad = k in ("slow_seconds", "hang_seconds") and not (
+                        isinstance(obj[k], int | float)
+                        and not isinstance(obj[k], bool)
+                        and 0 <= obj[k] <= MAX_CONTROL_SECONDS  # False for `Infinity`, `NaN` (both parse) and 10**400
+                    )
+                    if (k == "mode" and obj[k] not in MODES) or seconds_bad:
+                        self._send(400, b"{}")
+                        return
                 with state.lock:
-                    for k in ("mode", "label", "slow_seconds", "hang_seconds", "retry_after"):
-                        if k in obj:
-                            if k == "mode" and obj[k] not in MODES:
-                                self._send(400, b"{}")
-                                return
-                            setattr(state, k, obj[k])
+                    for k in keys:
+                        setattr(state, k, obj[k])
                 self._send(200, b"{}")
                 return
             if self.path != "/v1/messages":
@@ -189,9 +205,11 @@ def _handler(state: ModelState) -> type[BaseHTTPRequestHandler]:
             elif mode == "malformed":
                 self._send(200, b"{not json")
             else:
-                text = {"mixed": CYCLE[call_no % 3], "refusal": "I can't help with that.", "badlabel": "maybe"}.get(
-                    mode, label
-                )
+                text = {
+                    "mixed": CYCLE[(call_no - 1) % 3],
+                    "refusal": "I can't help with that.",
+                    "badlabel": "maybe",
+                }.get(mode, label)
                 body = {
                     "type": "message",
                     "content": [{"type": "thinking", "thinking": "hmm"}, {"type": "text", "text": text}],

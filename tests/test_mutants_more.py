@@ -282,7 +282,7 @@ def test_mutant_sender_shown_without_mask() -> None:  # drops the mask: the addr
     text = (Path(__file__).resolve().parents[1] / "src/lead_desk/portal/pages/leads.js").read_text(encoding="utf-8")
     bad = text.replace(
         "P.ui.guarded('email', mailSender, P.reveal.key('sender', mailSender),",
-        "(function (a, b, c, d) { return a; })('email', mailSender, P.reveal.key('sender', mailSender),",
+        "(function (a, b, c, d) { return b; })('email', mailSender, P.reveal.key('sender', mailSender),",
     )
     assert bad != text and not test_later_messages._sender_masked(bad)
 

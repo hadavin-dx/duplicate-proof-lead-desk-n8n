@@ -121,9 +121,10 @@
   // ---- Demo controls page
   function describe(r, label) {
     var answers = (r.data && r.data.answers) || [];
-    var n = { 'new': 0, duplicate: 0, replayed: 0, refused: 0 };
+    var n = { 'new': 0, duplicate: 0, replayed: 0, refused: 0, noanswer: 0 };
     answers.forEach(function (a) {
-      if (a.status >= 400) n.refused += 1;
+      if (typeof a.status !== 'number') n.noanswer += 1; // 'timeout' or 'error': the request never got an HTTP answer
+      else if (a.status >= 400) n.refused += 1;
       else if (a.replayed) n.replayed += 1;
       else if (a.verdict === 'new') n['new'] += 1;
       else if (a.verdict === 'duplicate') n.duplicate += 1;
@@ -133,6 +134,7 @@
     if (n.duplicate) pills.appendChild(h('span', { 'class': 'pill pill-neutral' }, h('span', { 'class': 'dot', 'aria-hidden': 'true' }), n.duplicate + (n.duplicate === 1 ? ' repeat' : ' repeats')));
     if (n.replayed) pills.appendChild(h('span', { 'class': 'pill pill-info' }, h('span', { 'class': 'dot', 'aria-hidden': 'true' }), n.replayed + ' already known: nothing changed'));
     if (n.refused) pills.appendChild(h('span', { 'class': 'pill pill-bad' }, P.icon('alert'), n.refused + ' refused'));
+    if (n.noanswer) pills.appendChild(h('span', { 'class': 'pill pill-bad' }, P.icon('alert'), n.noanswer + ' without an answer'));
     var list = h('ul', { 'class': 'dm-answers mono' }, answers.map(function (a) { return h('li', null, P.shownRef(a.ref) + '  ' + a.status + '  ' + (a.replayed ? 'replayed ' : '') + (a.verdict || '–')); }));
     return h('div', { 'class': 'stack' }, h('div', { 'class': 'dm-result-title' }, label), pills,
       answers.length ? h('details', { 'class': 'details' }, h('summary', null, 'Each answer'), list) : null);
@@ -263,6 +265,7 @@
         var d = r.data || {};
         return 'refused (' + (d.hint || (d.error ? (P.labels.error[d.error] || P.words(d.error)).toLowerCase() : r.status)) + ')';
       }
+      function dblFail() { P.ui.toast('Desk stopped. The page will reconnect.', 'warn'); dblBusy = false; paintDbl(); } // any request of the press that gets no answer frees the button
       dbl.addEventListener('click', function () {
         var it = items.filter(function (i) { return i.item_id === itemSel.value; })[0];
         if (!it) return;
@@ -283,10 +286,10 @@
                 var n = st.data && st.data.fakes && st.data.fakes.reachable ? st.data.fakes.outbox.count : null;
                 show(h('b', null, n === null ? 'The demo mail cannot be read.' : 'Emails in demo mail now: ' + n));
                 dblBusy = false; paintDbl();
-              });
-            });
+              }, dblFail);
+            }, dblFail);
           })();
-        }, function () { P.ui.toast('Desk stopped. The page will reconnect.', 'warn'); dblBusy = false; paintDbl(); });
+        }, dblFail);
       });
       var retryCard = P.ui.card({
         title: 'Retry twice test', why: 'Presses Retry twice in the same instant on a failed follow-up. The desk must accept one press and refuse the other, so at most one email is sent.', testid: 'demo-retry-card',

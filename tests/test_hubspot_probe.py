@@ -5,13 +5,13 @@ from __future__ import annotations
 import importlib
 import json
 import sys
-import threading
 from collections.abc import Callable, Iterator
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 
 import pytest
+from support import start_serving, stop_serving
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import hubspot_probe as hp  # noqa: E402
@@ -73,11 +73,10 @@ class Stub:
 
         self.srv = HTTPServer(("127.0.0.1", 0), H)
         self.url = f"http://127.0.0.1:{self.srv.server_port}"
-        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        start_serving(self.srv)
 
     def close(self) -> None:
-        self.srv.shutdown()
-        self.srv.server_close()
+        stop_serving(self.srv)
 
 
 HAPPY: dict[str, list[tuple[int, Any]]] = {

@@ -31,6 +31,7 @@ from typing import Any, NoReturn, cast
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from lead_desk import db, lockfile, portal_api
+from lead_desk import desk as desk_module
 from lead_desk.adapters import FakesUnreachable
 from lead_desk.config import Config, is_loopback_host, is_unspecified, read_leadflow
 from lead_desk.constants import (
@@ -87,7 +88,7 @@ from lead_desk.contract import is_fd_exhaustion
 from lead_desk.desk import Desk, DeskSettingRefused, Reply
 from lead_desk.envnum import SettingRefused
 from lead_desk.hooks import Hooks
-from lead_desk.loader import DemoPortal, load_approvers, load_demo_adapters, load_demo_portal
+from lead_desk.loader import DemoPortal, KnowsBoundAddress, load_approvers, load_demo_adapters, load_demo_portal
 
 try:
     import resource  # not on Windows
@@ -637,6 +638,11 @@ class _Handler(BaseHTTPRequestHandler):
         except ValueError:
             name = "error"
         self._send(code, {"error": name})
+        if (
+            getattr(self, "headers", None) is not None
+        ):  # the headers were read (an unknown method, 501): the body is on its way
+            self._flush_and_half_close()
+            self._skip_body()
 
     def _flush_and_half_close(self) -> None:
         """The reply is complete for the client now; the follow-up must not keep it waiting."""
@@ -904,6 +910,8 @@ class _Handler(BaseHTTPRequestHandler):
         n = self._content_length() or 0
         if n > self._desk.config.size_cap_bytes:
             self._send(HTTP_TOO_LARGE, {"error": "too_large"})
+            self._flush_and_half_close()
+            self._drain(n)  # like POST /leads and the resolve route: a close with the body unread can reset the reply
             return
         try:
             raw = self.rfile.read(n) if n else b""
@@ -1005,6 +1013,8 @@ def make_server(desk: Desk, config: Config) -> ThreadingHTTPServer:
     server.started_at = desk.now()  # the desk's clock, like every other time the portal shows
     server.allowed_hosts = _allowed_hosts(config)
     server.demo = demo
+    if isinstance(demo, KnowsBoundAddress):  # optional: a demo extension that aims at the desk needs the real port
+        demo.set_bound_address(str(server.server_address[0]), int(server.server_address[1]))
     return server
 
 
@@ -1091,7 +1101,9 @@ def main(hooks: Hooks | None = None) -> None:
     or from the adapter settings, printed with the setting's name; any other ValueError is a bug and is not
     turned into 4), or an AI adapter that declares a `timeout_seconds` that
     is not a number above 0 or is above MODEL_CALL_BUDGET_SECONDS (`DeskSettingRefused`): the message is printed,
-    nothing is served. The checks of the constants themselves run when the modules are imported,
+    nothing is served. A `db_path` of `:memory:` is refused the same way (exit code 4): the check runs after
+    `ensure_descriptor_budget`, `Config.from_env` and the public-bind check, and before the folder and the lock step.
+    The checks of the constants themselves run when the modules are imported,
     so an edited constant that does not fit ends with a Python traceback (exit code 1) before `main` runs.
     SIGTERM stops it like Ctrl+C: the reaper is stopped, then the lock is given back. `hooks` goes to the Desk
     (the crash launcher and scripts/crash_desk.py pass `FlagFileHooks(path)`)."""
@@ -1107,6 +1119,10 @@ def main(hooks: Hooks | None = None) -> None:
         sys.exit(EXIT_DESK_SETTING_REFUSED)
     if (bind_problem := config.public_bind_problem()) is not None:  # no sign-in: a real service stays on this computer
         print(f"the desk refuses a setting: {bind_problem}", flush=True)
+        sys.exit(EXIT_DESK_SETTING_REFUSED)
+    # by the module, not by `Desk` (the name `Desk` may be replaced); BEFORE the lock step: no ".lock" file
+    if (problem := desk_module.book_problem(config.db_path)) is not None:
+        print(f"the desk refuses to start: {problem}", flush=True)
         sys.exit(EXIT_DESK_SETTING_REFUSED)
     config.db_path.parent.mkdir(parents=True, exist_ok=True)
     try:

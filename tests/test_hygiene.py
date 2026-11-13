@@ -338,7 +338,10 @@ def _workflow_problems(text: str) -> list[str]:
             block.append(ln)
         if "write" in NL.join(block):
             problems.append("top-level permissions must be read-only (raise per job)")
-    problems += [f"forbidden trigger: {t}" for t in FORBIDDEN_TRIGGERS if re.search(rf"^[ ]*{t}\b", text, re.MULTILINE)]
+    # anywhere on a line that is not a comment: also `on: pull_request_target` and `on: [push, pull_request_target]`
+    problems += [
+        f"forbidden trigger: {t}" for t in FORBIDDEN_TRIGGERS if re.search(rf"^[^#\n]*\b{t}\b", text, re.MULTILINE)
+    ]
     return problems
 
 

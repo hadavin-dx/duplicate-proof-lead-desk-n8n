@@ -6,10 +6,11 @@ from __future__ import annotations
 import sqlite3
 import threading
 import time
+from collections.abc import Callable
 from typing import Any
 
 import pytest
-from support import CrashAt, lead
+from support import CrashAt, lead, start_serving, stop_serving
 
 from lead_desk import db, gate, identity
 from lead_desk import desk as desk_module
@@ -54,11 +55,24 @@ def test_inflight_places_go_in_arrival_order() -> None:
         t = threading.Thread(target=waiter, args=(i,))
         t.start()
         threads.append(t)
-        time.sleep(0.05)  # arrival order is fixed
+        deadline = time.monotonic() + 5
+        while (
+            len(sem._waiters) < i + 1 and time.monotonic() < deadline
+        ):  # this waiter has its ticket: the order is fixed
+            time.sleep(0.005)
+        assert len(sem._waiters) == i + 1
     sem.release()
     for t in threads:
         t.join(5)
     assert order == [0, 1, 2, 3, 4]
+
+
+def _wait_until(done: Callable[[], bool]) -> None:
+    """Poll for a condition (never a fixed pause): the test goes on as soon as it holds."""
+    deadline = time.monotonic() + 5
+    while not done() and time.monotonic() < deadline:
+        time.sleep(0.005)
+    assert done()
 
 
 def test_a_late_arrival_cannot_take_a_released_place() -> None:
@@ -67,7 +81,10 @@ def test_a_late_arrival_cannot_take_a_released_place() -> None:
     got: list[str] = []
     t = threading.Thread(target=lambda: got.append("old") if sem.acquire(timeout=5) else None)
     t.start()
-    time.sleep(0.1)
+    deadline = time.monotonic() + 5
+    while not sem._waiters and time.monotonic() < deadline:  # the old waiter has its ticket
+        time.sleep(0.005)
+    assert len(sem._waiters) == 1
     sem.release()  # handed to the old waiter at once
     assert sem.acquire(timeout=0.05) is False, "a late arrival barged in"
     t.join(5)
@@ -89,10 +106,10 @@ def test_a_request_write_is_served_before_a_follow_up_drive() -> None:
 
     t1 = threading.Thread(target=take, args=("drive", True))
     t1.start()
-    time.sleep(0.1)
+    _wait_until(lambda: len(g._low) == 1)  # the drive stands in the low line
     t2 = threading.Thread(target=take, args=("request", False))
     t2.start()
-    time.sleep(0.1)
+    _wait_until(lambda: len(g._waiters) == 1)  # the request stands in the normal line
     g.release()
     t1.join(5)
     t2.join(5)
@@ -466,8 +483,7 @@ def test_a_redirect_is_not_followed_and_a_long_reply_is_cut() -> None:
 
     with socketserver.TCPServer(("127.0.0.1", 0), H) as srv:
         port = srv.server_address[1]
-        t = threading.Thread(target=srv.serve_forever, daemon=True)
-        t.start()
+        start_serving(srv)
         try:
             import urllib.error
 
@@ -477,4 +493,4 @@ def test_a_redirect_is_not_followed_and_a_long_reply_is_cut() -> None:
             with pytest.raises(ValueError):
                 _exchange(f"http://127.0.0.1:{port}/big", {"a": 1}, 5)
         finally:
-            srv.shutdown()
+            stop_serving(srv)

@@ -28,7 +28,9 @@ from support import (
     raw_exchange,
     run_threads,
     start_proc,
+    start_serving,
     stop_proc,
+    stop_serving,
     wait_until,
 )
 
@@ -1464,17 +1466,14 @@ def test_restart_same_port_portal_open(env) -> None:
         t0 = time.monotonic()
         srv = make_server(rig.desk, cfg)  # raises OSError when the port cannot be bound
         seconds.append(time.monotonic() - t0)
-        thread = threading.Thread(target=srv.serve_forever, daemon=True)
-        thread.start()
+        start_serving(srv)  # returns once the loop really runs: a shutdown can never wait on a loop not yet started
         url = f"http://{HOST}:{port}"
         try:
             for _poll in range(3):  # the open page: connections that end in TIME_WAIT on this port
                 status, out = get(url, "/api/ui/summary")
                 assert status == 200 and out["counts"]["received"] == 1
         finally:
-            srv.shutdown()
-            srv.server_close()
-            thread.join(timeout=30)
+            stop_serving(srv, what="restart test server")
     print(f"restart x{RESTARTS}: bind seconds max={max(seconds):.4f} mean={sum(seconds) / len(seconds):.4f}")
     assert max(seconds) < server.REQUEST_TIMEOUT_SECONDS
 

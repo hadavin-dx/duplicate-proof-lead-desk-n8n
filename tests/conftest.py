@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from lead_desk.constants import REQUEST_TIMEOUT_SECONDS
 from lead_desk.server import serve_in_thread
 
 # The demo folder is removable (deleting it leaves the desk and its tests intact). Without it a test FILE that needs the
@@ -29,7 +30,7 @@ def pytest_sessionstart(session: pytest.Session) -> None:
 
 
 if DEMO_PRESENT:
-    from support import Rig, build_rig
+    from support import Rig, ServerDidNotStop, build_rig, stop_within
 
     from demo_only.fakes_server import FakesServer, serve_fakes_in_thread, stop_fakes
 
@@ -72,12 +73,38 @@ if not DEMO_PRESENT:
             rep.longrepr = (str(item.path), 0, "Skipped: needs the demo_only folder, which is not here")
 
 
+# serve_in_thread's stop ends with thread.join(timeout=REQUEST_TIMEOUT_SECONDS), so a legitimate stop can last that long
+# (measured, a scratch test with stalled clients: the handler threads are daemons and are not joined, the stop took
+# 0.00 s; the product bound is still the worst case). The guard must catch a wait with no end, not a slow stop:
+# twice that.
+DESK_STOP_SECONDS = 2 * REQUEST_TIMEOUT_SECONDS
+_ENVS: list[Env] = []  # the Env objects of the running test; _stuck_servers_fail_the_test reads them at the very end
+
+
+@pytest.fixture(autouse=True)
+def _stuck_servers_fail_the_test() -> Iterator[None]:
+    """After the test and after every `env` teardown (this fixture is set up first, so it is torn down last): a server
+    that did not stop in time fails the test, and the message names every one. Every other item was closed first."""
+    _ENVS.clear()
+    yield
+    report = "; ".join(r for r in (e.stuck_report() for e in _ENVS) if r)
+    _ENVS.clear()
+    if report:
+        raise ServerDidNotStop(report)
+
+
 class Env:
     def __init__(self, tmp_path: Path) -> None:
         self.tmp = tmp_path
         self._n = 0
         self.rigs: list[Rig] = []
         self._stops: list[Callable[[], None]] = []
+        self.stuck: list[ServerDidNotStop] = []  # every server that did not stop in time; the test fails at its end
+        _ENVS.append(self)
+
+    def stuck_report(self) -> str:
+        """One message naming every server that did not stop (empty when all stopped)."""
+        return "; ".join(str(e) for e in self.stuck)
 
     def rig(self, **kw: Any) -> Rig:
         self._n += 1
@@ -90,12 +117,12 @@ class Env:
     def serve(self, r: Rig) -> str:
         """Start the real HTTP server (port 0) around r.desk; returns the base URL."""
         base, stop = serve_in_thread(r.desk, port=0)
-        self._stops.append(stop)
+        self._stops.append(lambda: stop_within(stop, "desk server", seconds=DESK_STOP_SECONDS))
         return base
 
     def fakes(self, mode: str = "keyed", crm_mode: str = "keyed") -> tuple[FakesServer, str]:
         srv, url, th = serve_fakes_in_thread(mode, 0, crm_mode)
-        self._stops.append(lambda: stop_fakes(srv, th))
+        self._stops.append(lambda: stop_within(lambda: stop_fakes(srv, th), "fakes server", seconds=DESK_STOP_SECONDS))
         return srv, url
 
     def stop_on_close(self, stop: Callable[[], None]) -> None:
@@ -105,6 +132,8 @@ class Env:
         for stop in reversed(self._stops):
             try:
                 stop()
+            except ServerDidNotStop as e:  # reported, all of them, after every other item is closed
+                self.stuck.append(e)
             except Exception:  # noqa: BLE001, S110 (teardown must reach every item)
                 pass
         for r in self.rigs:
@@ -113,6 +142,14 @@ class Env:
                     d.close()
                 except Exception:  # noqa: BLE001, S110
                     pass
+
+
+@pytest.fixture(autouse=True)
+def _no_desk_settings_from_the_shell(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A DESK_* setting of the person running the tests must never leak into a test that calls `server.main()` or
+    `Config.from_env()` without a dict (a test that wants one sets it itself with monkeypatch.setenv)."""
+    for name in [n for n in os.environ if n.startswith("DESK_")]:
+        monkeypatch.delenv(name)
 
 
 @pytest.fixture

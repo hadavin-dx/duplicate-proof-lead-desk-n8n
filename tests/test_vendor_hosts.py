@@ -3,22 +3,14 @@ a reserved example name. The names are taken from constants.py itself, so this f
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from lead_desk import constants
 
 REPO = Path(__file__).resolve().parents[1]
-FOLDERS = ("src", "scripts", "tests", "load_tools", "demo_only", "docs", "n8n", ".github")
-ROOT_FILES = (
-    "README.md",
-    "contract.md",
-    "versions.md",
-    "SECURITY.md",
-    "pyproject.toml",
-    "patterns.txt",
-    "exceptions.txt",
-)
+FOLDERS = ("src", "scripts", "tests", "tools", "load_tools", "demo_only", "docs", "n8n", ".github", ".codeant")
 TEXT_SUFFIXES = {
     ".py",
     ".md",
@@ -34,7 +26,32 @@ TEXT_SUFFIXES = {
     ".toml",
     ".yml",
     ".in",
+    ".yaml",
+    ".properties",
 }
+
+
+def root_files(repo: Path) -> tuple[str, ...]:
+    """Every file at the top of the repository, dotfiles too: the ones git tracks (an untracked scratch note of whoever
+    runs the tests is not part of the repository); every file of the folder when git is not there or says nothing."""
+    try:
+        done = subprocess.run(  # noqa: S603
+            ["git", "ls-files", "-z"],  # noqa: S607
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        tracked = [n for n in done.stdout.split("\0") if n and "/" not in n]
+        if done.returncode == 0 and tracked:
+            return tuple(sorted(tracked))
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError):  # no git, a broken git, a non-UTF-8 name
+        pass
+    return tuple(sorted(p.name for p in repo.iterdir() if p.is_file()))
+
+
+ROOT_FILES = root_files(REPO)
 
 
 def vendor_names() -> set[str]:
@@ -65,3 +82,43 @@ def test_no_vendor_host_name_outside_constants_py() -> None:
         text = path.read_text(encoding="utf-8", errors="replace").lower()
         offenders += [f"{path.relative_to(REPO).as_posix()}: {n}" for n in sorted(names) if n.lower() in text]
     assert offenders == []
+
+
+def test_root_files_are_the_tracked_ones_not_an_untracked_scratch_file(tmp_path: Path) -> None:
+    git = ["git", "-c", "user.email=a@example.test", "-c", "user.name=a"]
+    subprocess.run([*git, "init", "-q"], cwd=tmp_path, check=True)  # noqa: S603
+    (tmp_path / "README.md").write_text("x", encoding="utf-8")
+    (tmp_path / ".codeant.yaml").write_text("x", encoding="utf-8")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "deep.md").write_text("x", encoding="utf-8")
+    subprocess.run([*git, "add", "."], cwd=tmp_path, check=True)  # noqa: S603
+    (tmp_path / "scratch-notes.md").write_text("untracked", encoding="utf-8")
+    assert root_files(tmp_path) == (".codeant.yaml", "README.md")
+
+
+def test_root_files_fall_back_to_every_file_when_git_is_not_there(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / "README.md").write_text("x", encoding="utf-8")
+    (tmp_path / "scratch-notes.md").write_text("x", encoding="utf-8")
+    (tmp_path / "sub").mkdir()
+    monkeypatch.setenv("PATH", str(tmp_path / "no-bin"))  # no git on the path
+    assert root_files(tmp_path) == ("README.md", "scratch-notes.md")
+
+
+def test_root_files_fall_back_to_every_file_when_git_is_there_but_the_folder_is_not_a_repository(
+    tmp_path: Path, monkeypatch
+) -> None:
+    (tmp_path / "README.md").write_text("x", encoding="utf-8")
+    (tmp_path / "scratch-notes.md").write_text("x", encoding="utf-8")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))  # never find a repository above the folder
+    assert subprocess.run(["git", "rev-parse"], cwd=tmp_path, capture_output=True, check=False).returncode != 0  # noqa: S603, S607
+    assert root_files(tmp_path) == ("README.md", "scratch-notes.md")
+
+
+def test_root_files_fall_back_when_git_prints_a_file_name_that_is_not_utf8(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / "README.md").write_text("x", encoding="utf-8")
+
+    def not_utf8(*args: object, **kw: object) -> object:
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+    monkeypatch.setattr(subprocess, "run", not_utf8)
+    assert root_files(tmp_path) == ("README.md",)

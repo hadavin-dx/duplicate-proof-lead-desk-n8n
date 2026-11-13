@@ -140,7 +140,7 @@ Pages for a person (the pages only read; the buttons write: Retry and the “I c
   * The soft limit is raised to exactly the need, not to the hard limit, when the hard limit is unlimited or at least that. The refusal message names the open-file limit in force and what the desk needs.
 * (2) The lock file (exit 2, "another desk is using this database").
 * (3) The adapters (exit 1 if `/fake/info` cannot be read).
-* (4) `Desk` is built (exit 4, `EXIT_DESK_SETTING_REFUSED`, if the desk refuses a setting here: an AI adapter that declares a `timeout_seconds` that is not a number above 0 or is above the AI call budget of 9 s; the message is printed and nothing is served; this code differs from exit 1 on purpose).
+* (4) `Desk` is built (exit 4, `EXIT_DESK_SETTING_REFUSED`, if the desk refuses a setting here: an AI adapter that declares a `timeout_seconds` that is not a number above 0 or is above the AI call budget of 9 s, or a `db_path` of `:memory:` (every request thread opens its own connection, so a private memory book would be empty for every thread but the first; `main` runs this one check after the open-file check, `Config.from_env` and the public-bind check, but BEFORE the folder and lock steps (so a refused start makes no `.lock` file and no folder), and `Desk` repeats it); the message is printed and nothing is served; this code differs from exit 1 on purpose).
 * (5) The bind (retried for `BIND_RETRY_SECONDS`, then exit 5).
 * (6) The SIGTERM and SIGINT handler is installed, after the bind and before `desk.start_background()`, inside the `try` that holds the shutdown steps.
 * (7) `desk.start_background()` (starts the reaper).
@@ -274,7 +274,7 @@ These rules are part of this contract. Where one differs from a table row above,
   * Backfills for books migrated this way are not corrected afterwards. The table `later_decisions` (approval mode, see Resolve check order step 3a) is created by the same script and is part of the schema; its two triggers are in the repair list.
 - `crm_done` backfill: a `sending` row gets 2 (a put may have started; the safe path decides); a row whose `last_error` starts with `internal:` (the CRM or AI step broke) keeps 0, so the next try asks the CRM; a `failed` row with a label and any other error gets 1 (older books asked the CRM before the first send); any other row that was tried (`pending` or `unknown`, attempts > 0) gets 2. A `sent` row is never touched.
 - `ambiguous_prior` backfill: 1 for a `pending` row whose last_error is `crash_while_sending`. `send_started` backfill: 1 for a `sending` row with `crm_done=1` (it may have sent: the safe side), 0 elsewhere.
-- Journal mode: `db.connect` raises RuntimeError unless the file is in WAL mode (a private `:memory:` book is exempt).
+- Journal mode: `db.connect` raises RuntimeError unless the file is in WAL mode (a private `:memory:` book is exempt in `db.connect` itself, which single-threaded tests use; the desk never accepts one, see step (4) of the start-up list above).
 - Lock file: the db path is resolved first (symlinks). BlockingIOError means another desk. On Windows only EACCES (locking violation) and EDEADLK mean another desk. Any other OSError, and a lock file that keeps being replaced (3 tries), give `LockUnavailableError` (the lock could not be taken for another reason; still a refusal).
 - The lead-book path is resolved once in `Desk.__init__` (`Desk._db_path`) and used for the connections and the write gate, so a later chdir cannot send a new thread to another file.
 

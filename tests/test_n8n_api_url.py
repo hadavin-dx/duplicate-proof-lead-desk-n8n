@@ -10,12 +10,12 @@ import os
 import socket
 import subprocess
 import sys
-import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
+from support import start_serving, stop_all, stop_serving
 
 REPO = Path(__file__).resolve().parents[1]
 RESERVED = "example" + "." + "test"  # the reserved test domain, as the repository's own rules allow it
@@ -199,7 +199,7 @@ class _ListThenRedirect(BaseHTTPRequestHandler):
 def _server(redirect_to: str | None) -> tuple[ThreadingHTTPServer, type[_Recorder]]:
     handler = type("H", (_Recorder,), {"log": [], "redirect_to": redirect_to})
     srv = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    start_serving(srv)
     return srv, handler
 
 
@@ -213,9 +213,7 @@ def test_a_redirect_is_not_followed_so_the_key_never_reaches_the_new_address(
         monkeypatch.setattr(mod, "BASE", _u("http", f"127.0.0.1:{first.server_address[1]}"))
         code, _body = mod.call("GET", "/workflows")
     finally:
-        for s in (first, target):
-            s.shutdown()
-            s.server_close()
+        stop_all((first, target))
     assert code == 302, "a redirect is reported as an error answer"
     assert first_log.log[0]["x-n8n-api-key"] == "made-up-key-for-the-test"  # the first address did get the key
     assert target_log.log == [], "the redirect target was called: the key header would have gone with it"
@@ -225,14 +223,13 @@ def _run_against(
     handler: type[BaseHTTPRequestHandler], monkeypatch: pytest.MonkeyPatch, tmp_path: Path, argv: list[str]
 ):
     srv = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    start_serving(srv)
     try:
         mod = _load(monkeypatch, tmp_path, None)
         monkeypatch.setattr(mod, "BASE", _u("http", f"127.0.0.1:{srv.server_address[1]}"))
         return mod.main(["n8n_api.py", *argv])
     finally:
-        srv.shutdown()
-        srv.server_close()
+        stop_serving(srv)
 
 
 @pytest.mark.parametrize("cmd", ["list", "activate", "deactivate"])
@@ -416,9 +413,7 @@ def test_the_key_header_goes_straight_to_this_computer_never_to_a_proxy_of_the_e
         monkeypatch.setattr(mod, "BASE", _u("http", f"127.0.0.1:{target.server_address[1]}"))
         code, _body = mod.call("GET", "/workflows")
     finally:
-        for s in (target, proxy):
-            s.shutdown()
-            s.server_close()
+        stop_all((target, proxy))
     assert code == HTTPStatus.OK
     assert proxy_log.log == [], "the request (and the key header) went to the proxy of the environment"
     assert target_log.log[0]["x-n8n-api-key"] == KEY_TEXT
@@ -443,8 +438,7 @@ def test_the_shared_opener_still_uses_the_proxy_of_the_environment_unless_told_n
         with open_http(_u("http", f"{RESERVED}:81/x"), 5):
             pass
     finally:
-        proxy.shutdown()
-        proxy.server_close()
+        stop_serving(proxy)
     assert len(proxy_log.log) == 1, "open_http no longer honours the proxy settings by default"
 
 
@@ -587,14 +581,13 @@ def test_an_error_page_that_is_cut_off_still_gives_the_status_not_a_traceback(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     srv = ThreadingHTTPServer(("127.0.0.1", 0), _short_body(500))
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    start_serving(srv)
     try:
         mod = _load(monkeypatch, tmp_path, None)
         monkeypatch.setattr(mod, "BASE", _u("http", f"127.0.0.1:{srv.server_address[1]}"))
         code, body = mod.call("GET", "/workflows")
     finally:
-        srv.shutdown()
-        srv.server_close()
+        stop_serving(srv)
     assert code == 500 and body == "(no body kept)"
 
 
@@ -622,7 +615,7 @@ def test_the_shared_opener_still_uses_the_proxy_of_the_environment_for_https_too
 
     monkeypatch.setattr(urllib.request, "_opener", None)  # urlopen caches its opener, with the proxies of that moment
     proxy = ThreadingHTTPServer(("127.0.0.1", 0), Connect)
-    threading.Thread(target=proxy.serve_forever, daemon=True).start()
+    start_serving(proxy)
     try:
         for name in ("HTTPS_PROXY", "https_proxy"):
             monkeypatch.setenv(name, _u("http", f"127.0.0.1:{proxy.server_address[1]}"))
@@ -632,8 +625,7 @@ def test_the_shared_opener_still_uses_the_proxy_of_the_environment_for_https_too
             with pytest.raises(OSError):  # the stand-in proxy refuses the tunnel
                 open_http(_u("https", f"{RESERVED}:8443/x"), 5, follow_redirects=follow)
     finally:
-        proxy.shutdown()
-        proxy.server_close()
+        stop_serving(proxy)
     assert seen == [f"{RESERVED}:8443"] * 2, "open_http did not send the https request through the environment proxy"
 
 
@@ -701,12 +693,11 @@ def test_a_workflow_name_that_a_strict_cp1252_pipe_cannot_encode_is_listed_with_
 ) -> None:
     body = ('{"data": [{"id": "1", "active": true, "name": "' + UNSHOWABLE[which] + '"}]}').encode("ascii")
     srv = ThreadingHTTPServer(("127.0.0.1", 0), _fixed(200, body))
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    start_serving(srv)
     try:
         done = _run_script(tmp_path, srv.server_address[1], "list")
     finally:
-        srv.shutdown()
-        srv.server_close()
+        stop_serving(srv)
     assert done.returncode == 0, done.stderr
     assert "Traceback" not in done.stderr and done.stdout.startswith("w-") and "-end active" in done.stdout
     assert "?" in done.stdout and KEY_TEXT not in done.stdout + done.stderr
@@ -717,11 +708,10 @@ def test_importing_a_workflow_with_such_a_name_also_ends_cleanly(tmp_path: Path)
         '{"name": "w-\\ud83d\\ude00-end", "nodes": [], "connections": {}}', encoding="ascii"
     )
     srv = ThreadingHTTPServer(("127.0.0.1", 0), _fixed(200, b"{}"))
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    start_serving(srv)
     try:
         done = _run_script(tmp_path, srv.server_address[1], "import", str(tmp_path / "w.json"))
     finally:
-        srv.shutdown()
-        srv.server_close()
+        stop_serving(srv)
     assert done.returncode == 0, done.stderr
     assert "Traceback" not in done.stderr and "w-?-end 200" in done.stdout.replace("??", "?")

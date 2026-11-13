@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib
 from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 from lead_desk.adapters import HttpCrm, HttpOutbox
 from lead_desk.config import Config, read_approvers
@@ -26,6 +26,15 @@ class DemoPortal(Protocol):
     assets: Mapping[str, tuple[bytes, str]]  # "portal_demo.js" -> (bytes, "text/javascript; charset=utf-8")
 
     def handle(self, method: str, path: str, body: bytes) -> tuple[int, Any]: ...
+
+
+@runtime_checkable
+class KnowsBoundAddress(Protocol):
+    """The OPTIONAL part of DemoPortal (a Protocol cannot mark a member optional, so it is a second one, checked with
+    isinstance): an extension that aims at the desk itself learns the real address once the server is bound (with a
+    configured port 0 the port is only known then)."""
+
+    def set_bound_address(self, bind: str, port: int) -> None: ...
 
 
 def load_demo_portal(desk: Desk) -> DemoPortal | None:

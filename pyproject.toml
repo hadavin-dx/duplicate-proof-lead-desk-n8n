@@ -9,6 +9,9 @@ dependencies = []
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
 testpaths = ["tests"]
+# A test stuck for 5 minutes prints the stack of every thread (the run is not stopped; a hung server shutdown
+# shows up as BaseServer.shutdown in the dump). No new dependency: this is built into pytest.
+faulthandler_timeout = 300
 # test command: python -m pytest -q
 # Run commands set PYTHONPATH=src (there is no build-system); see contract.md, Run commands.
 
