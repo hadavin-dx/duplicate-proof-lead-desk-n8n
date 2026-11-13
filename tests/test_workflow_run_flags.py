@@ -24,7 +24,8 @@ def _run_commands(path: Path) -> list[str]:
     doc = yaml.safe_load(path.read_text(encoding="utf-8"))
     lines: list[str] = []
     for job in doc["jobs"].values():
-        for step in job["steps"]:
+        # a job that calls a reusable workflow (`uses:`) has no steps, and `steps:` may be empty
+        for step in job.get("steps") or []:
             if "run" in step:
                 lines += str(step["run"]).replace("\\\n", " ").splitlines()
     return lines
@@ -46,3 +47,23 @@ def test_a_pip_install_in_a_workflow_takes_wheels_only_with_hashes(path: Path) -
     for cmd in (c for c in _run_commands(path) if re.search(r"\bpip3?\s+install\b", c)):
         assert "--only-binary=:all:" in cmd, f"{path.name}: pip install without --only-binary=:all: -> {cmd}"
         assert "--require-hashes" in cmd, f"{path.name}: pip install without --require-hashes -> {cmd}"
+
+
+def test_a_job_without_steps_has_no_commands_and_the_next_job_is_still_read(tmp_path: Path) -> None:
+    """A job that calls a reusable workflow (`uses:`, no `steps:`) is valid for GitHub, and so is an empty `steps:`."""
+    call = "octo/repo/.github/workflows/x.yml@" + "a" * 40
+    lines = [
+        "jobs:",
+        "  call:",
+        f"    uses: {call}",
+        "  empty:",
+        "    steps:",
+        "  real:",
+        "    steps:",
+        "      - run: echo hi",
+        "",
+    ]
+    text = chr(10).join(lines)
+    path = tmp_path / "w.yml"
+    path.write_text(text, encoding="utf-8")
+    assert _run_commands(path) == ["echo hi"]
