@@ -31,6 +31,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 from http import HTTPStatus
@@ -40,6 +41,13 @@ from urllib.parse import urlsplit
 REPO = Path(__file__).resolve().parents[1]
 if str(REPO / "src") not in sys.path:
     sys.path.insert(0, str(REPO / "src"))
+
+
+def _probe_roots() -> list[str]:
+    """PROBE ONLY, DO NOT MERGE. Allowed folders: current folder, repository, temporary folder, LEAD_DESK_PATH_ROOTS."""
+    extra = [r for r in os.environ.get("LEAD_DESK_PATH_ROOTS", "").split(os.pathsep) if r]
+    return [os.path.realpath(r) for r in (os.getcwd(), str(REPO), tempfile.gettempdir(), *extra)]
+
 
 from http_guard import open_http  # noqa: E402
 
@@ -189,7 +197,13 @@ def main(a: list[str]) -> int:
             say(w["name"], "active" if w["active"] else "inactive")
     elif cmd == "import":
         try:
-            wf = json.loads(Path(a[2]).read_text(encoding="utf-8"))
+            real = os.path.realpath(a[2])  # PROBE shape INLINE (a NUL makes realpath raise ValueError: caught below)
+            if not any(
+                os.path.commonpath([os.path.normcase(real), os.path.normcase(root)]) == os.path.normcase(root)
+                for root in _probe_roots()
+            ):
+                raise ValueError("outside the allowed folders")
+            wf = json.loads(Path(real).read_text(encoding="utf-8"))
             wf.setdefault("settings", {})
             str(wf["name"])  # a workflow file without a name is refused here, not after the call
         except (OSError, ValueError, KeyError, AttributeError, RuntimeError) as e:  # no file, not JSON (or nested too

@@ -44,10 +44,13 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import re
 import sys
 from pathlib import Path
 from typing import Any
+
+from tools.pathconfine import PathRefused, allowed_roots, confine_existing  # PROBE ONLY, DO NOT MERGE
 
 TOP = ("name", "active", "nodes", "connections")
 SETTINGS = ("executionOrder",)  # add a key here only when the demo needs that setting
@@ -175,8 +178,24 @@ def main(argv: list[str]) -> int:
     except ValueError:
         print("usage: python -m tools.scrub_n8n_export in.json out.json")
         return 2
-    wf = json.loads(Path(src).read_text(encoding="utf-8"))
-    Path(dst).write_text(json.dumps(scrub(wf), indent=2, ensure_ascii=False) + chr(10), encoding="utf-8")
+    try:  # PROBE replicate of shape SPLIT (as check_invariants.read_jsonl): existing file only, environment roots
+        src_path = confine_existing(src, what="in.json")
+    except PathRefused as e:
+        print(f"refused: {e}")
+        return 2
+    wf = json.loads(src_path.read_text(encoding="utf-8"))
+    try:  # PROBE shape INLINE on a WRITE: realpath, check against the allowed folders, refuse, write the real path
+        real = os.path.realpath(dst)
+        inside = any(
+            os.path.commonpath([os.path.normcase(real), os.path.normcase(root)]) == os.path.normcase(root)
+            for root in allowed_roots()
+        )
+    except (OSError, ValueError):  # a NUL or a loop in the path, or another drive
+        inside = False
+    if not inside:
+        print("refused: out.json: path is outside the allowed folders")
+        return 2
+    Path(real).write_text(json.dumps(scrub(wf), indent=2, ensure_ascii=False) + chr(10), encoding="utf-8")
     return 0
 
 
