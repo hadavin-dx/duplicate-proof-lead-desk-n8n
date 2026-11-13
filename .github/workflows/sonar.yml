@@ -42,7 +42,8 @@ jobs:
         # ONE pip call with both locks: pip refuses to run when a package is pinned to two versions (tested, pip 24.0);
         # two separate calls would silently let the second lock replace the first one's pin. --only-binary: wheels only, so no
         # package build script runs before the test step.
-        run: python -m pip install --require-hashes --only-binary=:all: -r requirements-dev.txt -r requirements-coverage.txt
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements-dev.txt -r requirements-coverage.txt
       - name: Tests with coverage (no secrets in this step)
         env:
           # the demo_only folder must be in the checkout: without it most test files would skip and the figure would be wrong
