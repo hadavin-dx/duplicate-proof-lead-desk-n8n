@@ -7,8 +7,10 @@ import copy
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
+import sys
 import tomllib
 import unicodedata
 import warnings
@@ -41,17 +43,21 @@ def _gitleaks_exe() -> str | None:
     return path
 
 
-def _git(cwd: Path, *args: str) -> str:
-    p = subprocess.run(  # noqa: S603
-        ["git", *args],  # noqa: S607
+def _run(cwd: Path, *argv: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    """Runs a program with an argument list (no shell) in cwd; the one place of this file that starts one."""
+    return subprocess.run(  # noqa: S603
+        argv,
         cwd=cwd,
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
-        check=True,
+        check=check,
     )
-    return p.stdout
+
+
+def _git(cwd: Path, *args: str) -> str:
+    return _run(cwd, "git", *args).stdout
 
 
 def test_no_demo_only_outside_loader() -> None:
@@ -202,6 +208,161 @@ def test_sh_blobs_no_cr() -> None:
     for n in names:
         blob = subprocess.run(["git", "show", ":" + n], cwd=REPO, capture_output=True, check=True).stdout  # noqa: S603, S607
         assert 13 not in blob, f"{n} contains a carriage return in the index"
+
+
+CRLF_HINT = (  # the two commands between backticks are run by test_every_cure_in_the_message_works
+    "this file holds a carriage return (Windows line endings, CRLF, or a lone CR); if it is a text file, "
+    "the repository stores LF (.gitattributes). Replace <file> with the path of the file. "
+    "Cure 1 works only if you have not run git add or git commit on the file, and it throws away your edits to the "
+    "file: `git checkout -- <file>`. After git add or git commit cure 1 does nothing (the CR stays): use cure 2. "
+    "Cure 2 works in every state, keeps your edits and needs Python (write python3 on macOS or Linux, py -3 on "
+    "Windows if python is not found; if you had run git add or git commit, run it again afterwards): "
+    '`python -c "import sys, pathlib; p = pathlib.Path(sys.argv[1]); '
+    "p.write_bytes(p.read_bytes().replace(b'\\r\\n', b'\\n').replace(b'\\r', b'\\n'))\" <file>`"
+)
+HINT_PHRASES = (  # words a reader relies on; a test fails if one is dropped from the hint
+    "a lone CR|git checkout -- <file>|throws away your edits|needs Python|python3 on macOS or Linux|py -3|"
+    "Replace <file> with the path|a text file|Cure 1 works only if you have not run git add or git commit|"
+    "cure 1 does nothing|Cure 2 works in every state|run it again afterwards"
+)
+# Measured (gitleaks 8.30.1, one file at a time turned to CRLF): in sonar-project.properties a CR makes `gitleaks dir`
+# report the key line; in exceptions.txt it makes the `grep -v -E -f exceptions.txt` step of lint.yml keep every line
+# (the Python reading of the file in these tests does not care). .gitleaks.toml, patterns.txt, requirements-*.txt: no
+# effect measured. Neither failure that does happen says a word about line endings.
+LF_ONLY_FILES = ("sonar-project.properties", "exceptions.txt")
+CRLF, LONE_CR = bytes([13, 10]), bytes([13])
+
+
+def _scan_files_with_cr(root: Path) -> list[str]:
+    """The tracked LF_ONLY_FILES under root, a git work tree, that hold a carriage return (CRLF or a lone CR)."""
+    names = [n for n in _git(root, "ls-files").splitlines() if n in LF_ONLY_FILES]
+    assert "sonar-project.properties" in names, "the list of files to check is empty: the test would prove nothing"
+    return [n for n in names if b"\r" in (root / n).read_bytes()]
+
+
+def test_the_secret_scan_files_have_no_carriage_return() -> None:
+    """A CR in a file the scan exceptions rely on makes a scan fail without a word about line endings: say it early."""
+    bad = _scan_files_with_cr(REPO)
+    assert not bad, f"{', '.join(bad)}: {CRLF_HINT}"
+
+
+def _planted_tree(tmp_path: Path, name: str, line_end: bytes, staged: bool = False) -> Path:
+    """A git work tree like a Windows checkout: the index holds LF, the work copy of `name` has line_end instead.
+    staged=True runs git add after that (the state in which cure 1 does nothing)."""
+    tree = tmp_path / "planted"
+    tree.mkdir(parents=True)
+    # the two lines of the repo's .gitattributes that cover these files; without them core.autocrlf=true (the Git for
+    # Windows default) treats a CRLF copy as clean
+    (tree / ".gitattributes").write_text("* text=auto eol=lf\n*.txt text eol=lf\n", encoding="utf-8")
+    lf = (REPO / name).read_bytes().replace(b"\r", b"")
+    for n in {"sonar-project.properties", name}:
+        (tree / n).write_bytes(lf)
+    _git(tree, "init", "-q")
+    _git(tree, "add", ".")
+    (tree / name).write_bytes(lf.replace(b"\n", line_end))
+    if staged:
+        _git(tree, "add", ".")
+    return tree
+
+
+def _guard_message(tree: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """The text of the failure of the real guard test run against the tree (it must fail)."""
+    with monkeypatch.context() as m:  # undone on exit: the caller must see the real REPO again
+        m.setattr(sys.modules[__name__], "REPO", tree)
+        with pytest.raises(AssertionError) as exc:
+            test_the_secret_scan_files_have_no_carriage_return()
+    assert REPO != tree, "REPO is still patched"  # then a cure test would compare a file with itself
+    return str(exc.value)
+
+
+def test_the_guard_names_every_bad_file_says_what_to_do_and_refuses_an_empty_list(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tree = _planted_tree(tmp_path / "bad", "exceptions.txt", CRLF)
+    (tree / "sonar-project.properties").write_bytes(b"x" + LONE_CR)  # the lone CR is the very last byte
+    (tree / "sub").mkdir()  # only the files in the root are scanned: the same name in a folder is not flagged
+    (tree / "sub" / "exceptions.txt").write_bytes(b"x" + CRLF)
+    _git(tree, "add", ".")
+    assert _scan_files_with_cr(tree) == ["exceptions.txt", "sonar-project.properties"]
+    msg = _guard_message(tree, monkeypatch)
+    assert "exceptions.txt, sonar-project.properties: " + CRLF_HINT in msg  # every bad file, not only the first
+    assert all(p in msg for p in HINT_PHRASES.split("|")), msg  # the warnings and the platform notes are pinned
+    for i, shape in enumerate((b"a\nb" + CRLF + b"c\n", b"a" * 200 + b"\nb" + LONE_CR + b"c\n")):
+        one = _planted_tree(tmp_path / f"shape{i}", "exceptions.txt", b"\n")  # the only CR is neither first nor last
+        (one / "exceptions.txt").write_bytes(shape)
+        assert _scan_files_with_cr(one) == ["exceptions.txt"], shape
+    empty = tmp_path / "empty"  # no sonar-project.properties: the check must refuse to answer
+    empty.mkdir()
+    (empty / "exceptions.txt").write_bytes(b"x")  # another scan file is not enough
+    _git(empty, "init", "-q")
+    _git(empty, "add", ".")
+    with pytest.raises(AssertionError, match="empty"):
+        _scan_files_with_cr(empty)
+    with pytest.raises(subprocess.CalledProcessError):  # a failing git call raises (check=True is the default)
+        _git(empty, "no-such-git-command")
+
+
+@pytest.mark.parametrize("staged", [False, True], ids=["unstaged", "staged"])
+@pytest.mark.parametrize("line_end", [CRLF, LONE_CR], ids=["crlf", "lone-cr"])
+def test_every_cure_in_the_message_works(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, line_end: bytes, staged: bool
+) -> None:
+    """Takes the commands (between backticks) out of the real failure message, runs each one on a fresh planted file
+    and checks that the guard then passes and the file is the LF text again. `python` is run as this interpreter.
+    After git add (staged) cure 1 is measured to do nothing (git thinks the file is unchanged): the message says so
+    (HINT_PHRASES), and only the Python cure is expected to work there."""
+    name = "sonar-project.properties"
+    msg = _guard_message(_planted_tree(tmp_path / "msg", name, line_end), monkeypatch)
+    cures = re.findall(r"`([^`]+)`", msg)
+    assert [c.split()[0] for c in cures] == ["git", "python"], cures
+    for i, cure in enumerate(cures):
+        tree = _planted_tree(tmp_path / f"cure{i}", name, line_end, staged)
+        assert _scan_files_with_cr(tree) == [name], "the plant must hold a CR before the cure"
+        argv = shlex.split(cure.replace("<file>", name))
+        _run(tree, sys.executable if argv[0] == "python" else argv[0], *argv[1:])
+        if staged and argv[0] == "git":  # if a newer git cures this, reword the hint (cure 1 then works everywhere)
+            assert _scan_files_with_cr(tree) == [name], "git checkout -- <file> cured a staged file: " + cure
+        else:
+            assert _scan_files_with_cr(tree) == [], cure
+            assert (tree / name).read_bytes() == (REPO / name).read_bytes().replace(b"\r", b""), cure
+
+
+def _check_gitleaks_premise(exe: str, tmp_path: Path) -> None:
+    for line_end, found in ((b"\n", False), (CRLF, True)):
+        tree = _planted_tree(tmp_path / str(len(line_end)), "sonar-project.properties", line_end)
+        shutil.copyfile(REPO / ".gitleaks.toml", tree / ".gitleaks.toml")
+        cmd = [exe, "dir", "--no-banner", "--redact", "--config", ".gitleaks.toml", "--exit-code", "1", "."]
+        rc = _run(tree, *cmd, check=False).returncode
+        # a crash must not read as clean (measured: a bad option exits 126, a missing config 1): exact code both ways
+        assert rc == (1 if found else 0), f"gitleaks exit code {rc}"
+
+
+def test_gitleaks_reports_a_carriage_return_in_the_key_file_but_not_the_lf_copy(tmp_path: Path) -> None:
+    """Why the guard exists, with the real program (about 1 s; skipped without it)."""
+    exe = _gitleaks_exe()
+    if not exe and not os.environ.get(REQUIRE_SCAN_ENV):
+        pytest.skip(
+            f"no gitleaks program on PATH (set {GITLEAKS_ENV}); set {REQUIRE_SCAN_ENV}=1 to make this a failure"
+        )
+    assert exe, f"gitleaks binary not found: put it on PATH or set {GITLEAKS_ENV}"
+    _check_gitleaks_premise(exe, tmp_path)
+
+
+@pytest.mark.parametrize("crash_on_cr", [False, True], ids=["clean-copy", "crlf-copy"])
+def test_a_gitleaks_that_crashes_on_either_copy_fails_the_premise(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, crash_on_cr: bool
+) -> None:
+    real = subprocess.run
+
+    def fake(cmd, **kw):  # git runs for real; the "gitleaks" answers like the real one on one copy, exit 2 on the other
+        if cmd[0] == "git":
+            return real(cmd, **kw)
+        has_cr = b"\r" in (kw["cwd"] / "sonar-project.properties").read_bytes()
+        return subprocess.CompletedProcess(cmd, 2 if has_cr == crash_on_cr else int(has_cr))
+
+    monkeypatch.setattr(subprocess, "run", fake)
+    with pytest.raises(AssertionError, match="exit code 2"):
+        _check_gitleaks_premise("fake-gitleaks", tmp_path)
 
 
 def test_exceptions_narrow(tmp_path: Path) -> None:
