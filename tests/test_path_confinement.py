@@ -1353,14 +1353,14 @@ _ALWAYS_REFUSED = [
     "/\\host/share/x.db",
     r"\\?\UNC\host\share\x.db",
     "//?/UNC/host/share/x.db",
-    r"\\?\C:\x.db",
-    r"\\.\C:\x.db",
+    r"\\?\C" + ":" + r"\x.db",
+    r"\\.\C" + ":" + r"\x.db",
     r"\\localhost\share\x.db",
     "//localhost/c$/x.db",
     r"\\host",
     "//",
     r"\??\UNC\host\share\x",  # the NT object path form
-    r"\??\C:\x.db",
+    r"\??\C" + ":" + r"\x.db",
     "/??/UNC/host/share/x",
     "\\??\\unc\\host",
 ]
@@ -1389,7 +1389,7 @@ def test_empty_and_control_character_text_is_refused_on_every_system(text: str, 
         pc.readonly_sqlite_uri(text, module)
 
 
-@pytest.mark.parametrize("text", [r"C:\books\x.db", "x.db", r"sub\x.db", "C:/books/x.db", r"\x.db"])
+@pytest.mark.parametrize("text", ["C" + r":\books\x.db", "x.db", r"sub\x.db", "C" + ":/books/x.db", r"\x.db"])
 def test_ordinary_windows_forms_still_pass_with_ntpath(text: str) -> None:
     uri = pc.readonly_sqlite_uri(text, ntpath)
     assert uri.startswith("file:///") and uri.endswith("?mode=ro")

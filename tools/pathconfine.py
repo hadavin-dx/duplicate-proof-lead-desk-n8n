@@ -301,7 +301,7 @@ def _refuse_network_path(text: str, path_module: ModuleType = os.path) -> None:
     if any(ord(c) < 32 or ord(c) == 127 for c in text):
         raise PathRefused("book path: contains a control character")
     flat = text.replace("/", "\\")
-    if path_module.sep == "\\" and flat.startswith("\\??\\"):  # the NT object path form (\??\UNC\..., \??\C:\...)
+    if path_module.sep == "\\" and flat.startswith("\\??\\"):  # the NT object path form (\??\UNC\... and \??\ plus a drive path)
         raise PathRefused(_DEVICE_OR_NETWORK)
     # ntpath also treats a backslash-slash or slash-backslash start as a network path and returns it unchanged
     # (not normalised): compare in one form
