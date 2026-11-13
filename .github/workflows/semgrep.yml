@@ -23,7 +23,7 @@ concurrency:
 jobs:
   semgrep:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20  # a ceiling, not a measurement: no run on GitHub has been seen; the install took 17 s on a fast link in one test
+    timeout-minutes: 20  # a ceiling, not a measurement: the run time of the live run was not read for this comment; the install took 17 s on a fast link in one test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -51,8 +51,10 @@ jobs:
         # coverage with no change in this repository when the registry changes. Keep it OUT of the required checks.
         # Exit codes (seen with this pinned Semgrep 1.185.0 on a made-up local rule, and with the registry blocked): 0 clean,
         # 1 findings (--error), 2 registry or network failure or a scan path that does not exist, 7 a rule file that cannot be read.
-        # Status: ERROR-level clean on commit 0841f36 of the branch pr-3-tests (an earlier commit, not in main's history because the earlier pull requests were squashed into 61ded9e; the scan was not repeated on later ones) as of the lead's run (Semgrep 1.185.0, p/python + p/javascript, the five
-        # folders below); no run of this workflow on GitHub has been seen yet: the first live CI run stays the check. tests/ and demo_only/ are not scanned.
+        # Status: first live run on GitHub (read from the job log by the project lead, not by the author of this comment):
+        # run 43403502735, 2026-11-13, head 15b8b15e: "Scanning 64 files tracked by git with 79 Code rules", "Ran 77 rules on 47 files: 0 findings", exit 0.
+        # A green job alone does NOT prove that rules ran: the log line "Ran N rules on M files" is the proof (docs/tests.md, "Semgrep"). tests/ and demo_only/ are not scanned.
+        # Network use: PyPI file hosts (lock file, hash-checked), the CPython download of setup-python (GitHub-hosted Python builds), and the Semgrep rule download service (host name ends in .dev) for the two packs.
         # Only exit 2 is retried (3 tries); findings are never retried. If all 3 tries end in 2, the job fails: re-run it later,
         # or check that src scripts load_tools tools n8n all exist (the message names the possible causes).
         # --metrics=off: no usage data is sent. --disable-version-check: no call to the Semgrep website for a newer version.
