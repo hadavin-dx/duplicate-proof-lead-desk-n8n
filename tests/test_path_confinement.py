@@ -1528,8 +1528,10 @@ def test_the_sqlite_uri_check_decides_like_confine_existing_for_the_same_real_fi
     book_path = inside / name
     try:
         book_path.write_text("", encoding="utf-8")
-    except OSError:  # Windows cannot create a file whose name holds a C0 control character
-        pytest.skip("this system cannot create a file with this name")
+    except OSError:
+        if os.name != "nt" or not re.search(r"[\x00-\x1f]", name):  # only Windows and a C0 control character
+            raise
+        pytest.skip("Windows cannot create a file whose name holds a C0 control character")
     by_confine = _decision(pc.confine_existing, book_path, what="f")
     by_uri = _decision(pc.readonly_sqlite_uri, book_path)
     assert by_confine is confine_accepts, label
@@ -1562,10 +1564,15 @@ def test_the_sqlite_uri_is_built_from_the_checked_text_not_from_a_second_look_at
 def test_a_lone_surrogate_is_a_plain_refusal_not_a_unicode_error(tmp_path: Path) -> None:
     """Linux cannot encode a lone surrogate as a file name: the answer must be a PathRefused, never a
     UnicodeEncodeError. Windows can encode it, and then the call simply returns."""
-    try:
-        pc.readonly_sqlite_uri(str(tmp_path) + "/a" + chr(0xD800) + "b.db")
-    except pc.PathRefused as refused:
-        assert "not a valid file name" in str(refused)
+    text = str(tmp_path) + "/a" + chr(0xD800) + "b.db"
+    if os.name == "posix":
+        with pytest.raises(pc.PathRefused, match="not a valid file name"):
+            pc.readonly_sqlite_uri(text)
+    else:  # Windows may encode it: then the call returns; it must never raise anything but PathRefused
+        try:
+            pc.readonly_sqlite_uri(text)
+        except pc.PathRefused:
+            pass
 
 
 # ---------- follow-up B: the fake model server's path options, the message and stream nits ----------

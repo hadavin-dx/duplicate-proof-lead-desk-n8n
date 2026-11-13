@@ -60,12 +60,13 @@ system reports it.
 functions returned: the path, percent-encoded by ``Path.as_uri`` (a ``?`` or ``#`` in a file name cannot start a new
 option), plus the fixed option ``mode=ro``. Refused, with ``PathRefused`` and a message that never prints the value:
 anything that is not a path (None, a number, ``bytes``); empty or blank text; a control character (C0, DEL, C1); text
-longer than ``MAX_PATH_CHARS``; and, when the Windows path rules apply, a network or device path:
+longer than ``MAX_PATH_CHARS``; text the file system encoding cannot encode (for example a lone surrogate U+D800);
+and, when the Windows path rules apply, a network or device path:
 ``\\\\server\\share\\x.db`` and ``//server/share/x.db`` (also with the two separators mixed),
 ``\\\\?\\UNC\\...``, ``\\\\?\\C:\\...``,
 ``\\\\.\\C:\\...`` and the NT object path form ``\\??\\...``. ``Path.as_uri`` turns a share path into
 ``file://server/share/x.db``, and SQLite accepts only an empty or ``localhost`` name after ``file://`` (SQLite's
-documentation of its URI names), so the read-only open could not work. Every other path, on every system, builds the
+documentation of its URI names), so the read-only open could not work. Every other path builds the
 same text as before. Copy the book to a
 local drive (a mapped network drive is probably refused too: Windows reports it by its network name; not measured).
 What is NOT measured: the behaviour of SQLite on Windows itself (this was tested on Linux, on the URI text only).
@@ -87,8 +88,9 @@ MAX_NAME_CHARS = 255  # one file name of a NEW file
 ROOTS_ENV = "LEAD_DESK_PATH_ROOTS"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# C0 (U+0000-U+001F), DEL and C1 (U+0080-U+009F): NUL ends a name early in C code, and no control character is part of
-# a legitimate book name (zero-width, bidi and line-separator characters are NOT refused here: names may hold them)
+# C0 (U+0000-U+001F), DEL and C1 (U+0080-U+009F): NUL ends a name early in C code; the other control characters are
+# refused by policy (no legitimate book name holds one). Zero-width, bidi and the line separators U+2028 and
+# U+2029 are NOT refused here: names may hold them
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 # the characters a NEW file's name may use, as a table: each character of the name is looked up here and the table's
 # own value is used, so the new name is built from this table and not copied from the argument
@@ -204,7 +206,10 @@ def _text(path: str | os.PathLike[str], what: str) -> str:
     if not isinstance(path, (str, os.PathLike)):
         raise PathRefused(f"{what}: not a path")
     text = os.fspath(path)
-    if not isinstance(text, str) or not text.strip():
+    if not isinstance(text, str):
+        raise PathRefused(f"{what}: empty path")
+    text = str.__str__(text)  # an exact str: a str subclass cannot answer differently in a later call
+    if not text.strip():
         raise PathRefused(f"{what}: empty path")
     if _CONTROL.search(text):
         raise PathRefused(f"{what}: contains a control character")
@@ -323,5 +328,5 @@ def readonly_sqlite_uri(path: str | os.PathLike[str], path_module: ModuleType = 
     text = _refuse_network_path(path, path_module)
     try:
         return Path(text).absolute().as_uri() + "?mode=ro"
-    except UnicodeEncodeError as error:  # a lone surrogate cannot be written as a file name
-        raise PathRefused("book path: contains text that is not a valid file name") from error
+    except UnicodeEncodeError:  # text the file system encoding cannot encode, for example a lone surrogate U+D800
+        raise PathRefused("book path: contains text that is not a valid file name") from None
