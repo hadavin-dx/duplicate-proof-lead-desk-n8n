@@ -5,14 +5,17 @@ Made-up data only; the "outside" folder is a sibling folder of the jail in the t
 
 from __future__ import annotations
 
+import ast
 import importlib
 import json
 import ntpath
 import os
+import re
 import shutil
 import sqlite3
 import sys
 import tempfile
+import types
 import unicodedata
 from pathlib import Path
 from typing import Any
@@ -522,7 +525,11 @@ def test_scrub_refuses_outside_in_and_out(jail: tuple[Path, Path], capsys: pytes
     assert not (inside / "out.json").exists()
     assert scrub_n8n_export.main(["x", str(inside / "in.json"), str(outside / "out.json")]) == 2
     assert not (outside / "out.json").exists()
-    assert "refused" in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert "refused" in captured.err and captured.out == ""  # an error goes to the error stream, not to the output
+    assert scrub_n8n_export.main(["x"]) == 2
+    captured = capsys.readouterr()
+    assert "usage:" in captured.err and captured.out == ""
     assert scrub_n8n_export.main(["x", str(inside / "in.json"), str(inside / "out.json")]) == 0
     assert (inside / "out.json").is_file()
 
@@ -766,17 +773,792 @@ def test_random_paths_never_leave_the_allowed_folder(jail: tuple[Path, Path]) ->
         assert os.path.commonpath([str(got), str(root)]) == str(root), text
 
 
-def test_no_flagged_site_opens_a_raw_argument() -> None:
-    """Siblings guard: each tool file imports the helper (a new tool that opens argv text must do the same)."""
-    for rel in (
-        "load_tools/check_invariants.py",
-        "load_tools/load_driver.py",
-        "scripts/n8n_api.py",
-        "scripts/run_real_check.py",
-        "tools/scrub_n8n_export.py",
-        "load_tools/catcher.py",
-    ):
-        assert "tools.pathconfine import" in (REPO / rel).read_text(encoding="utf-8"), rel
+_SANITIZERS = frozenset({"confine", "confine_existing", "confine_anywhere", "_confined"})
+# methods of a path object (the receiver is the path); a write method's argument is CONTENT, not a path
+_PATH_METHODS = frozenset(
+    {
+        "open",
+        "read_text",
+        "read_bytes",
+        "write_text",
+        "write_bytes",
+        "touch",
+        "unlink",
+        "mkdir",
+        "rmdir",
+        "rename",
+        "exists",
+        "is_file",
+        "is_dir",
+        "stat",
+        "iterdir",
+        "glob",
+        "rglob",
+        "chmod",
+        "symlink_to",
+        "hardlink_to",
+        "resolve",
+    }
+)
+_PATH_ARG_METHODS = frozenset({"rename", "replace", "symlink_to", "hardlink_to"})  # the argument is a path too
+# ``replace`` is a path method only with ONE argument (``str.replace`` and ``bytes.replace`` take two)
+# module functions that act on a file: os.remove, shutil.copyfile, sqlite3.connect, ... (os.fspath and the like only
+# compute a name, so they are not file operations)
+_OS_FILE_FUNCTIONS = frozenset(
+    {
+        "remove",
+        "unlink",
+        "rename",
+        "replace",
+        "renames",
+        "makedirs",
+        "mkdir",
+        "rmdir",
+        "removedirs",
+        "stat",
+        "lstat",
+        "listdir",
+        "scandir",
+        "walk",
+        "open",
+        "chmod",
+        "chown",
+        "link",
+        "symlink",
+        "readlink",
+        "truncate",
+        "utime",
+        "access",
+        "startfile",
+        "exists",
+        "isfile",
+        "isdir",
+        "islink",
+        "getsize",
+        "getmtime",
+        "lexists",
+    }
+)
+_NUMBER_MAKERS = frozenset({"int", "float", "bool", "len", "ord", "range"})  # the result is a number, never a path
+_CONTENT_READERS = frozenset({"read_text", "read_bytes", "read", "readline", "readlines", "loads", "load"})
+_MUTATORS = frozenset({"append", "extend", "update", "add", "insert", "setdefault", "appendleft"})
+_FLAGGED_SITES = (
+    "load_tools/check_invariants.py",
+    "load_tools/load_driver.py",
+    "scripts/n8n_api.py",
+    "scripts/run_real_check.py",
+    "tools/scrub_n8n_export.py",
+    "load_tools/catcher.py",
+    "demo_only/fake_model_server.py",
+)
+# functions whose parameters are NOT command-line text although they open a file: (file, function) -> why
+_PARAMETER_ALLOWLIST: dict[tuple[str, str], tuple[tuple[str, ...], str]] = {
+    ("load_tools/load_driver.py", "_read_int"): (("kernel_file",), "a fixed kernel file named inside the module"),
+    ("load_tools/load_driver.py", "_worker"): (("args",), "its tuple is built by run() from the path run() confined"),
+    ("load_tools/catcher.py", "read_mode"): (("control",), "the mode file that main() confined, passed on by serve()"),
+    ("load_tools/catcher.py", "serve"): (("out", "control"), "the files that main() confined"),
+    ("demo_only/fake_model_server.py", "make_model_server"): (
+        ("call_log", "control_file"),
+        "the files that main() confined (a test hands it paths of its own)",
+    ),
+}
+# a function in the list above is a "path taker": a call of it with raw text is reported (its callers are checked)
+# scripts/run_real_check.py reads the paths named in its own settings file on purpose (docs/real-services.md): only
+# its command line is in scope, that is ``main`` and ``load_env``
+_PARAMETER_SCOPE: dict[str, frozenset[str]] = {"scripts/run_real_check.py": frozenset({"main", "load_env"})}
+
+
+def _is_sanitizer_call(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+    f = node.func
+    return (isinstance(f, ast.Name) and f.id in _SANITIZERS) or (isinstance(f, ast.Attribute) and f.attr in _SANITIZERS)
+
+
+def _base_name(node: ast.AST) -> str | None:
+    """The plain name at the bottom of ``a.b[0].c`` (what a store into an attribute or element changes weakly)."""
+    while isinstance(node, (ast.Attribute, ast.Subscript, ast.Starred)):
+        node = node.value
+    return node.id if isinstance(node, ast.Name) else None
+
+
+def _join(*states: set[str] | None) -> set[str] | None:
+    live = [s for s in states if s is not None]
+    return set().union(*live) if live else None
+
+
+def _target_names(target: ast.AST) -> list[str]:
+    return [n.id for n in ast.walk(target) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)]
+
+
+class _Taint:
+    """May-taint walk over one module. A name is CLEAN only when every path that reaches a use assigns it the result of
+    a path helper (confine, confine_existing, confine_anywhere): the state of two branches is joined by union, a loop
+    and a ``try`` join every state seen inside, and whatever the walk does not model counts as raw (the parameters of
+    every function, the content of a file, any call that is given raw text). It reports a file operation (``open``, a
+    path method, ``os.*``, ``shutil.*``, ``sqlite3.connect``) whose path is raw."""
+
+    def __init__(self, rel: str = "") -> None:
+        self.rel = rel
+        self.found: list[tuple[int, str]] = []
+        self.accs: list[set[str]] = []
+        self.sinkvars: set[str] = set()
+        self.takers = {name: v[0] for (rel2, name), v in _PARAMETER_ALLOWLIST.items() if rel2 == rel}
+        self.signatures: dict[str, list[str]] = {}
+
+    # ---- expressions: report sinks, return whether the value is raw ----
+    def expr(self, node: ast.AST | None, env: set[str]) -> bool:
+        if node is None:
+            return False
+        if _is_sanitizer_call(node):
+            assert isinstance(node, ast.Call)
+            for x in (*node.args, *[k.value for k in node.keywords]):
+                self.expr(x, env)  # the arguments are still evaluated (a nested open is still reported)
+            return False
+        if isinstance(node, ast.NamedExpr):
+            raw = self.expr(node.value, env)
+            if raw:
+                env.add(node.target.id)  # an assignment inside an expression may not run: it never makes a name clean
+            return raw
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
+            inner = set(env)
+            for gen in node.generators:
+                if self.expr(gen.iter, inner):
+                    inner.update(_target_names(gen.target))
+                for cond in gen.ifs:
+                    self.expr(cond, inner)
+            elts = [node.key, node.value] if isinstance(node, ast.DictComp) else [node.elt]
+            return any([self.expr(e, inner) for e in elts])
+        if isinstance(node, ast.IfExp):  # the test picks a value, it does not become the value
+            self.expr(node.test, env)
+            return any([self.expr(node.body, env), self.expr(node.orelse, env)])
+        if isinstance(node, ast.Lambda):
+            inner = set(env) | {a.arg for a in (*node.args.args, *node.args.kwonlyargs)}
+            return self.expr(node.body, inner)
+        if isinstance(node, ast.Name):
+            return node.id in env
+        if isinstance(node, ast.Attribute) and node.attr == "argv":
+            return True
+        child_raw = [self.expr(c, env) for c in ast.iter_child_nodes(node)]  # no short cut: every child is visited
+        raw = any(child_raw)
+        if isinstance(node, ast.Call):
+            f = node.func
+            if isinstance(f, ast.Name) and f.id in _NUMBER_MAKERS:
+                raw = False
+            if isinstance(f, ast.Attribute) and f.attr == "parse_args":
+                return True
+            if isinstance(f, ast.Attribute) and f.attr in _CONTENT_READERS:
+                raw = True  # the content of a file (even a checked one) is not a checked path
+            self.check_sink(node, env)
+            if isinstance(f, ast.Attribute) and f.attr in _MUTATORS and raw:
+                base = _base_name(f.value)
+                if base:
+                    env.add(base)
+        return raw
+
+    def check_sink(self, call: ast.Call, env: set[str]) -> None:
+        f = call.func
+        args = [*call.args, *[k.value for k in call.keywords]]
+        bad = False
+        if isinstance(f, ast.Name):
+            if f.id == "open":
+                bad = any(self.expr_quiet(a, env) for a in args)
+            elif f.id in self.sinkvars:  # a bound file method kept in a name and called later
+                bad = True
+            elif f.id in self.takers:  # a function that opens its parameter: what it is given must be checked
+                names = self.signatures.get(f.id, [])
+                given = [(names[i] if i < len(names) else "", a) for i, a in enumerate(call.args)]
+                given += [(k.arg or "", k.value) for k in call.keywords]
+                bad = any(n in self.takers[f.id] and self.expr_quiet(a, env) for n, a in given)
+        elif isinstance(f, ast.Attribute):
+            owner = f.value
+            module = owner.attr if isinstance(owner, ast.Attribute) else getattr(owner, "id", "")
+            if (
+                (module in ("os", "path") and f.attr in _OS_FILE_FUNCTIONS)
+                or module == "shutil"
+                or (module == "sqlite3" and f.attr == "connect")
+                or (module == "glob" and f.attr in ("glob", "iglob"))
+            ):
+                bad = any(self.expr_quiet(a, env) for a in args)
+            elif f.attr in _PATH_METHODS or (f.attr == "replace" and len(call.args) == 1 and not call.keywords):
+                bad = self.expr_quiet(owner, env) or (
+                    f.attr in _PATH_ARG_METHODS and any(self.expr_quiet(a, env) for a in args)
+                )
+        if bad:
+            self.found.append((call.lineno, ast.unparse(call)))
+
+    def expr_quiet(self, node: ast.AST, env: set[str]) -> bool:
+        probe = _Taint(self.rel)
+        probe.sinkvars = self.sinkvars
+        probe.takers = self.takers
+        probe.signatures = self.signatures
+        return probe.expr(node, set(env))
+
+    # ---- statements ----
+    def snap(self, env: set[str]) -> None:
+        for acc in self.accs:
+            acc |= env
+
+    def assign(self, target: ast.AST, raw: bool, env: set[str], weak: set[str]) -> None:
+        if isinstance(target, ast.Name):
+            if raw:
+                env.add(target.id)
+            elif target.id not in weak:
+                env.discard(target.id)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for t in target.elts:
+                self.assign(t, raw, env, weak)
+        elif isinstance(target, ast.Starred):
+            self.assign(target.value, raw, env, weak)
+        else:  # an attribute or an element: the rest of the object keeps its state, so only ever add
+            base = _base_name(target)
+            if base and raw:
+                env.add(base)
+
+    def block(self, stmts: list[ast.stmt], env: set[str] | None, weak: set[str]) -> set[str] | None:
+        """``None`` is "no path reaches here" (after return, raise, break, continue)."""
+        for s in stmts:
+            if env is None:
+                return None
+            env = self.stmt(s, env, weak)
+            if env is not None:
+                self.snap(env)
+        return env
+
+    def loop(self, body: list[ast.stmt], orelse: list[ast.stmt], env: set[str], weak: set[str]) -> set[str] | None:
+        acc = set(env)
+        self.accs.append(acc)
+        cur: set[str] | None = set(env)
+        for _ in range(2):  # a second pass lets a value assigned late in the body reach the top of the next round
+            cur = self.block(body, set((cur or set()) | acc), weak)
+        self.accs.pop()
+        self.snap(acc)
+        return self.block(orelse, set(acc | (cur or set())), weak)  # every state seen in the body, a break included
+
+    def stmt(self, s: ast.stmt, env: set[str], weak: set[str]) -> set[str] | None:
+        if isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            self.function(s, env)
+            return env
+        if isinstance(s, ast.ClassDef):
+            for st in s.body:
+                self.stmt(st, set(env), weak)
+            return env
+        if isinstance(s, (ast.Global, ast.Nonlocal)):
+            weak |= set(s.names)
+            return env
+        if isinstance(s, ast.Assign):
+            raw = self.expr(s.value, env)
+            if raw and isinstance(s.value, ast.Attribute) and s.value.attr in _PATH_METHODS:
+                self.sinkvars.update(n for t in s.targets for n in _target_names(t))
+            for t in s.targets:
+                self.assign(t, raw, env, weak)
+            return env
+        if isinstance(s, ast.AnnAssign):
+            self.assign(s.target, self.expr(s.value, env), env, weak)
+            return env
+        if isinstance(s, ast.AugAssign):
+            raw = self.expr(s.value, env) or self.expr_quiet(s.target, env)
+            self.assign(s.target, raw, env, weak)
+            return env
+        if isinstance(s, ast.If):
+            self.expr(s.test, env)
+            a = self.block(s.body, set(env), weak)
+            b = self.block(s.orelse, set(env), weak)
+            return _join(a, b)
+        if isinstance(s, (ast.For, ast.AsyncFor)):
+            raw = self.expr(s.iter, env)
+            self.assign(s.target, raw, env, weak)
+            return self.loop(s.body, s.orelse, env, weak)
+        if isinstance(s, ast.While):
+            self.expr(s.test, env)
+            return self.loop(s.body, s.orelse, env, weak)
+        if isinstance(s, (ast.With, ast.AsyncWith)):
+            for item in s.items:
+                raw = self.expr(item.context_expr, env)
+                if item.optional_vars is not None:
+                    self.assign(item.optional_vars, raw, env, weak)
+            return self.block(s.body, env, weak)
+        if isinstance(s, (ast.Try, ast.TryStar)):
+            acc = set(env)
+            self.accs.append(acc)
+            after = self.block(s.body, set(env), weak)
+            self.accs.pop()
+            self.snap(acc)
+            outs = [self.block(s.orelse, set(after), weak) if after is not None else None]
+            for h in s.handlers:
+                henv = set(acc | (after or set()))  # a handler can start from any state seen inside the body
+                if h.name:
+                    henv.discard(h.name)
+                outs.append(self.block(h.body, henv, weak))
+            joined = _join(*outs)
+            self.block(s.finalbody, set(acc | (joined or set())), weak)  # the final block also runs on the way out
+            return self.block(s.finalbody, joined, weak) if joined is not None else None
+        if isinstance(s, ast.Match):
+            raw = self.expr(s.subject, env)
+            outs = [set(env)]
+            for case in s.cases:
+                cenv = set(env)
+                if raw:
+                    cenv.update(
+                        n.name for n in ast.walk(case.pattern) if isinstance(n, (ast.MatchAs, ast.MatchStar)) and n.name
+                    )
+                    cenv.update(n.rest for n in ast.walk(case.pattern) if isinstance(n, ast.MatchMapping) and n.rest)
+                outs.append(self.block(case.body, cenv, weak))
+            return _join(*outs)
+        if isinstance(s, (ast.Return, ast.Raise, ast.Break, ast.Continue)):
+            for c in ast.iter_child_nodes(s):
+                self.expr(c, env)
+            self.snap(env)
+            return None
+        if isinstance(s, (ast.Expr, ast.Assert, ast.Delete)):
+            for c in ast.iter_child_nodes(s):
+                self.expr(c, env)
+            return env
+        for c in ast.iter_child_nodes(s):  # anything not modelled: visit its expressions, keep the state
+            if isinstance(c, ast.expr):
+                self.expr(c, env)
+        return env
+
+    def function(self, fn: ast.FunctionDef | ast.AsyncFunctionDef, outer: set[str]) -> None:
+        args = fn.args
+        params = [*getattr(args, "posonlyargs", []), *args.args, *args.kwonlyargs]
+        extra = [a for a in (args.vararg, args.kwarg) if a is not None]
+        allowed = (self.rel, fn.name) in _PARAMETER_ALLOWLIST
+        scope = _PARAMETER_SCOPE.get(self.rel)
+        in_scope = scope is None or fn.name in scope
+        names = {p.arg for p in (*params, *extra) if p.arg not in ("self", "cls") and (in_scope or p.arg == "path")}
+        env = set(outer) | (set() if allowed else names)
+        self.block(fn.body, env, set())
+
+    def run(self, tree: ast.Module) -> list[tuple[int, str]]:
+        for n in ast.walk(tree):
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                self.signatures[n.name] = [a.arg for a in (*n.args.posonlyargs, *n.args.args, *n.args.kwonlyargs)]
+        env: set[str] = set()
+        self.block(tree.body, env, set())
+        return sorted(set(self.found))
+
+
+def _raw_opens(tree: ast.Module, rel: str = "") -> list[tuple[int, str]]:
+    """(line, text) of every file operation whose path is raw. Raw: the parameters of every function, the result of
+    ``parse_args``, ``sys.argv``, the content of a file, and anything computed from those. Clean: only the result of a
+    path helper, and only when EVERY path to the use assigned it (see ``_Taint``)."""
+    return _Taint(rel).run(tree)
+
+
+# (the lines of a function that a tool file could contain, the line numbers that must be reported)
+_RAW_SHAPES = {
+    "plain": (
+        [
+            "def main(argv):",
+            "    a = ap.parse_args(argv)",
+            "    return Path(a.out).read_text()",
+        ],
+        [3],
+    ),
+    "via a name": (
+        [
+            "def main(argv):",
+            "    out = argv[1]",
+            "    with open(out) as fh:",
+            "        return fh",
+        ],
+        [3],
+    ),
+    "walrus": (
+        [
+            "def main(a):",
+            "    if (p := a.out):",
+            "        open(p)",
+        ],
+        [3],
+    ),
+    "walrus that cannot clean": (
+        [
+            "def main(a):",
+            "    p = a.out",
+            "    x = a and (p := confine(p, what='x'))",
+            "    open(p)",
+        ],
+        [4],
+    ),
+    "for over argv": (
+        [
+            "def main():",
+            "    for x in sys.argv[1:]:",
+            "        open(x)",
+        ],
+        [3],
+    ),
+    "with as": (
+        [
+            "def main(a):",
+            "    with ctx(a.out) as q:",
+            "        open(q)",
+        ],
+        [3],
+    ),
+    "comprehension": (
+        [
+            "def main(a):",
+            "    return [open(p) for p in a.paths]",
+        ],
+        [2],
+    ),
+    "parameter not named path": (
+        [
+            "def _w(target):",
+            "    return open(target)",
+        ],
+        [2],
+    ),
+    "method": (
+        [
+            "class C:",
+            "    def m(self, name):",
+            "        return open(name)",
+        ],
+        [3],
+    ),
+    "os.remove": (
+        [
+            "def main(a):",
+            "    os.remove(a.out)",
+        ],
+        [2],
+    ),
+    "os.rename": (
+        [
+            "def main(a):",
+            "    os.rename(a.out, 'x')",
+        ],
+        [2],
+    ),
+    "shutil.copyfile": (
+        [
+            "def main(a):",
+            "    shutil.copyfile('x', a.out)",
+        ],
+        [2],
+    ),
+    "shutil.rmtree": (
+        [
+            "def main(a):",
+            "    shutil.rmtree(a.out)",
+        ],
+        [2],
+    ),
+    "Path.rename": (
+        [
+            "def main(a):",
+            "    Path('x').rename(a.out)",
+        ],
+        [2],
+    ),
+    "Path.replace one argument": (
+        [
+            "def main(a):",
+            "    Path('x').replace(a.out)",
+        ],
+        [2],
+    ),
+    "exists": (
+        [
+            "def main(a):",
+            "    return Path(a.out).exists()",
+        ],
+        [2],
+    ),
+    "os.path.exists": (
+        [
+            "def main(a):",
+            "    return os.path.exists(a.out)",
+        ],
+        [2],
+    ),
+    "sqlite": (
+        [
+            "def main(a):",
+            "    return sqlite3.connect(a.db)",
+        ],
+        [2],
+    ),
+    "helper in one branch only": (
+        [
+            "def main(a):",
+            "    if a.x:",
+            "        p = confine(a.out, what='x')",
+            "    else:",
+            "        p = Path(a.out)",
+            "    open(p)",
+        ],
+        [6],
+    ),
+    "helper in the other branch only": (
+        [
+            "def main(a):",
+            "    if a.x:",
+            "        p = Path(a.out)",
+            "    else:",
+            "        p = confine(a.out, what='x')",
+            "    open(p)",
+        ],
+        [6],
+    ),
+    "attribute store keeps the name raw": (
+        [
+            "def main(a):",
+            "    a.x = 1",
+            "    open(a.out)",
+        ],
+        [3],
+    ),
+    "attribute store of clean text": (
+        [
+            "def main(a):",
+            "    a.host = '127.0.0.1'",
+            "    out = a.out",
+            "    open(out)",
+        ],
+        [4],
+    ),
+    "element store": (
+        [
+            "def main(a):",
+            "    d = {}",
+            "    d['k'] = a.out",
+            "    open(d['k'])",
+        ],
+        [4],
+    ),
+    "list append": (
+        [
+            "def main(a):",
+            "    d = []",
+            "    d.append(a.out)",
+            "    open(d[0])",
+        ],
+        [4],
+    ),
+    "break keeps the raw state": (
+        [
+            "def main(a):",
+            "    p = a.out",
+            "    for i in a.items:",
+            "        p = a.out",
+            "        if i:",
+            "            break",
+            "        p = confine(p, what='x')",
+            "    open(p)",
+        ],
+        [8],
+    ),
+    "try handler": (
+        [
+            "def main(a):",
+            "    p = a.out",
+            "    try:",
+            "        p = confine(p, what='x')",
+            "        risky()",
+            "    except OSError:",
+            "        open(p)",
+        ],
+        [7],
+    ),
+    "try then fall through": (
+        [
+            "def main(a):",
+            "    p = a.out",
+            "    try:",
+            "        risky()",
+            "        p = confine(p, what='x')",
+            "    except OSError:",
+            "        pass",
+            "    open(p)",
+        ],
+        [8],
+    ),
+    "global": (
+        [
+            "def main(a):",
+            "    global G",
+            "    G = a.out",
+            "    G = confine(G, what='x')",
+            "    open(G)",
+        ],
+        [5],
+    ),
+    "bound method": (
+        [
+            "def main(a):",
+            "    w = Path(a.out).write_text",
+            "    w('x')",
+        ],
+        [3],
+    ),
+    "right operand replaces the base": (
+        [
+            "def main(a):",
+            "    base = confine(a.d, what='x')",
+            "    open(base / a.name)",
+        ],
+        [3],
+    ),
+    "Path(clean, raw)": (
+        [
+            "def main(a):",
+            "    base = confine(a.d, what='x')",
+            "    open(Path(base, a.name))",
+        ],
+        [3],
+    ),
+    "joinpath": (
+        [
+            "def main(a):",
+            "    base = confine(a.d, what='x')",
+            "    open(base.joinpath(a.name))",
+        ],
+        [3],
+    ),
+    "content read from a file used as a path": (
+        [
+            "def main(a):",
+            "    cfg = confine(a.c, what='x')",
+            "    open(Path(cfg.read_text()))",
+        ],
+        [3],
+    ),
+    "nested function": (
+        [
+            "def main(a):",
+            "    def inner():",
+            "        return open(a.out)",
+            "    return inner()",
+        ],
+        [3],
+    ),
+    "raw passed to a path taker": (
+        [
+            "async def serve(host, port, out, control):",
+            "    pass",
+            "",
+            "",
+            "def main(a):",
+            "    return serve(a.host, a.port, a.out, a.control)",
+        ],
+        [6],
+    ),
+}
+
+_CLEAN_SHAPES = {
+    "helper result": (
+        [
+            "def main(a):",
+            "    out = confine(a.out, what='x')",
+            "    return open(out)",
+        ],
+        [],
+    ),
+    "helper in both branches": (
+        [
+            "def main(a):",
+            "    if a.x:",
+            "        p = confine(a.out, what='x')",
+            "    else:",
+            "        p = confine(a.o2, what='y')",
+            "    open(p)",
+        ],
+        [],
+    ),
+    "helper before the loop and in it": (
+        [
+            "def main(a):",
+            "    p = confine(a.out, what='x')",
+            "    for i in a.items:",
+            "        p = confine(i, what='y')",
+            "        open(p)",
+        ],
+        [],
+    ),
+    "helper after a raise in the handler": (
+        [
+            "def main(a):",
+            "    try:",
+            "        p = confine(a.out, what='x')",
+            "    except OSError:",
+            "        raise SystemExit(2)",
+            "    open(p)",
+        ],
+        [],
+    ),
+    "checked path joined with a fixed name": (
+        [
+            "def main(a):",
+            "    base = confine(a.d, what='x')",
+            "    open(base / 'x.txt')",
+        ],
+        [],
+    ),
+    "tainted content written to a fixed file": (
+        [
+            "def main(argv):",
+            "    n = int(argv[0])",
+            "    Path('fixed.txt').write_text(str(n))",
+        ],
+        [],
+    ),
+    "text replace": (
+        [
+            "def main(a):",
+            "    return a.out.replace('x', 'y')",
+        ],
+        [],
+    ),
+    "os.fspath only computes a name": (
+        [
+            "def main(a):",
+            "    return os.fspath(a.out)",
+        ],
+        [],
+    ),
+    "a number made from raw text": (
+        [
+            "def main(a):",
+            "    n = int(a.n)",
+            "    return Path('f%d' % n).exists()",
+        ],
+        [],
+    ),
+}
+
+
+def _lines_of(shape: tuple[list[str], list[int]]) -> list[int]:
+    return [line for line, _ in _raw_opens(ast.parse("\n".join(shape[0]) + "\n"), "load_tools/catcher.py")]
+
+
+@pytest.mark.parametrize("name", sorted(_RAW_SHAPES))
+def test_the_open_finder_reports_every_raw_shape(name: str) -> None:
+    assert _lines_of(_RAW_SHAPES[name]) == _RAW_SHAPES[name][1], name
+
+
+@pytest.mark.parametrize("name", sorted(_CLEAN_SHAPES))
+def test_the_open_finder_passes_a_checked_shape(name: str) -> None:
+    assert _lines_of(_CLEAN_SHAPES[name]) == _CLEAN_SHAPES[name][1], name
+
+
+@pytest.mark.parametrize("rel", _FLAGGED_SITES)
+def test_no_flagged_site_opens_a_raw_argument(rel: str) -> None:
+    """Siblings guard on real file operations, not on an import line. In each tool file, no file operation (``open``,
+    a path method such as ``read_text`` or ``rename``, ``os.remove``-like and ``shutil`` calls, ``sqlite3.connect``) may
+    act on text that came from the command line or from the parameters of a function unless a path helper (confine,
+    confine_existing, confine_anywhere) made the path on EVERY way to that point. What it cannot see (listed, not
+    hidden): a path that reaches a file operation through a call into another function (only the path takers named in
+    ``_PARAMETER_ALLOWLIST`` are followed), ``getattr`` and ``eval`` tricks, a file operation in another module, and the
+    paths that ``scripts/run_real_check.py`` reads from its own settings file (outside ``main`` and ``load_env`` that
+    file is not in scope). Reading a file does not make its content a checked path. The shapes it does handle are in
+    ``_RAW_SHAPES`` and ``_CLEAN_SHAPES``."""
+    tree = ast.parse((REPO / rel).read_text(encoding="utf-8"))
+    assert _raw_opens(tree, rel) == [], rel
 
 
 # ---------- P3 final: the helper at every flagged site, the rv17 findings, the three public functions ----------
@@ -1066,3 +1848,311 @@ def test_each_flagged_function_calls_the_helper_itself_and_never_an_inline_guard
     # the INLINE guard (realpath + commonpath in the tool) is the shape the analyser keeps refusing: not in tools
     attrs = {c.attr for c in ast.walk(node) if isinstance(c, ast.Attribute)}
     assert not {"realpath", "commonpath"} & attrs, (rel, func)
+
+
+# -- follow-up A: a foreign `tools` package, hard links, Windows network paths ------------------------------
+
+
+@pytest.mark.parametrize("script", ["check_invariants.py", "load_driver.py"])
+def test_a_script_start_survives_a_foreign_tools_package(tmp_path: Path, script: str) -> None:
+    """Class: the fallback import assumed that any failure means "the repository folder is not on the path yet". A
+    ``tools`` package of another project (here an empty one, first on PYTHONPATH) is found first and cached, so
+    adding the repository folder afterwards changed nothing and the start failed with ModuleNotFoundError."""
+    foreign = tmp_path / "foreign" / "tools"
+    foreign.mkdir(parents=True)
+    (foreign / "__init__.py").write_text("", encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["PYTHONPATH"] = str(tmp_path / "foreign") + os.pathsep + str(REPO / "src")
+    proc = start_proc([str(REPO / "load_tools" / script), "--help"], env)
+    proc.wait(timeout=60)
+    out = stop_proc(proc).decode("utf-8", "replace")
+    assert proc.returncode == 0, out[-500:]
+    assert "usage" in out.lower()
+
+
+@pytest.mark.parametrize("script", ["check_invariants.py", "load_driver.py", "catcher.py"])
+def test_a_foreign_tools_pathconfine_that_lacks_the_name_falls_back_to_ours(tmp_path: Path, script: str) -> None:
+    """The first import of a foreign ``tools.pathconfine`` that lacks the name raises ImportError (not its subclass
+    ModuleNotFoundError): the fallback must catch that too, drop the foreign package and load the repository's."""
+    foreign = tmp_path / "foreign" / "tools"
+    foreign.mkdir(parents=True)
+    (foreign / "__init__.py").write_text("", encoding="utf-8")
+    (foreign / "pathconfine.py").write_text("OTHER = 1\n", encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["PYTHONPATH"] = str(tmp_path / "foreign") + os.pathsep + str(REPO / "src")
+    proc = start_proc([str(REPO / "load_tools" / script), "--help"], env)
+    proc.wait(timeout=60)
+    out = stop_proc(proc).decode("utf-8", "replace")
+    assert proc.returncode == 0, out[-500:]
+    assert "usage" in out.lower()
+
+
+_KEEP_OURS = """
+import runpy, sys, types
+mod = types.ModuleType("tools.keepme")  # a module of THIS repository's tools package, already imported
+mod.__file__ = sys.argv[2] + "/tools/keepme.py"
+sys.modules["tools.keepme"] = mod
+sys.path.insert(0, sys.argv[1])  # a foreign `tools` package comes first
+runpy.run_path(sys.argv[3], run_name="not_main")
+assert sys.modules["tools.keepme"] is mod, "a module of this repository was dropped"
+import tools.pathconfine as pc
+assert pc.__file__.startswith(sys.argv[2]), pc.__file__
+print("kept")
+"""
+
+
+@pytest.mark.parametrize("script", ["check_invariants.py", "load_driver.py", "catcher.py"])
+def test_the_fallback_drops_only_foreign_tools_modules(tmp_path: Path, script: str) -> None:
+    """Only the ``tools`` modules that are not under the repository are dropped: one of ours that is already imported
+    keeps its identity (a second copy would break an ``isinstance`` check or a patch made on the first)."""
+    foreign = tmp_path / "foreign" / "tools"
+    foreign.mkdir(parents=True)
+    (foreign / "__init__.py").write_text("", encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["PYTHONPATH"] = str(REPO / "src")
+    proc = start_proc(
+        ["-I", "-c", _KEEP_OURS, str(tmp_path / "foreign"), str(REPO), str(REPO / "load_tools" / script)], env
+    )
+    proc.wait(timeout=60)
+    out = stop_proc(proc).decode("utf-8", "replace")
+    assert proc.returncode == 0, out[-800:]
+    assert out.strip().endswith("kept"), out[-500:]
+
+
+def test_a_hard_link_to_an_outside_file_passes_the_check(jail: tuple[Path, Path]) -> None:
+    """Pins the documented limit (tools/pathconfine.py, load_tools/README.md): a hard link is another name for the same
+    contents, there is no path to follow, so the check accepts it and a write goes through to the outside file."""
+    inside, outside = jail
+    target = outside / "secret.txt"
+    target.write_text(SECRET, encoding="utf-8")
+    try:
+        os.link(target, inside / "alias.txt")
+    except OSError as exc:  # a file system without hard links
+        pytest.skip(f"no hard links here: {exc}")
+    read = pc.confine_existing(inside / "alias.txt", what="f")
+    assert read.parent == inside.resolve() and read.read_text(encoding="utf-8") == SECRET
+    pc.confine(inside / "alias.txt", what="f").write_text("changed", encoding="utf-8")
+    assert target.read_text(encoding="utf-8") == "changed"
+
+
+def test_the_hard_link_limit_is_documented() -> None:
+    assert "Hard links are not detected" in (pc.__doc__ or "")
+    assert "Hard links are not detected" in (REPO / "load_tools" / "README.md").read_text(encoding="utf-8")
+
+
+def _unc_uri(_path: object) -> str:
+    """Stand-in for ``readonly_sqlite_uri`` as it behaves on Windows for a book on a share (ntpath on this system)."""
+    return pc.readonly_sqlite_uri(r"\\\\server\\share\\x.db", ntpath)
+
+
+def test_read_book_turns_the_network_path_refusal_into_an_input_error(
+    jail: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The refusal of a Windows network path used to leave ``read_book`` as a ``PathRefused`` traceback, but every
+    caller (check_invariants.main, scripts/run_real_check.py) catches only ``InputError``."""
+    inside, _ = jail
+    (inside / "b.db").write_text("", encoding="utf-8")
+    monkeypatch.setattr(ci, "readonly_sqlite_uri", _unc_uri)
+    for anywhere in (False, True):
+        with pytest.raises(ci.InputError, match="device or network path"):
+            ci.read_book(inside / "b.db", anywhere=anywhere)
+
+
+def test_check_invariants_main_reports_a_network_path_book_as_an_input_error(
+    jail: tuple[Path, Path], capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    inside, _ = jail
+    for name in ("r.jsonl", "c.jsonl", "l.jsonl"):
+        (inside / name).write_text('{"a": 1}\n', encoding="utf-8")
+    (inside / "m.json").write_text("[]", encoding="utf-8")
+    (inside / "b.db").write_text("", encoding="utf-8")
+    (inside / "r.jsonl.facts.json").write_text(json.dumps({"intended_requests": 1}), encoding="utf-8")
+    monkeypatch.setattr(ci, "readonly_sqlite_uri", _unc_uri)
+    monkeypatch.delenv("DESK_QUALIFIER", raising=False)
+    args = _ci_args(inside) | {"--facts": "r.jsonl.facts.json"}
+    del args["--drain"]
+    assert ci.main([w for pair in args.items() for w in pair]) == ci.EXIT_INPUT
+    err = capsys.readouterr().err
+    assert err.startswith("INPUT ERROR:") and "device or network path" in err and "Traceback" not in err
+
+
+def test_run_real_check_reads_a_network_path_book_as_unreadable_not_a_traceback(
+    jail: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    inside, _ = jail
+    (inside / "b.db").write_text("", encoding="utf-8")
+    monkeypatch.setattr(ci, "readonly_sqlite_uri", _unc_uri)
+    rrc = _rrc(monkeypatch)
+    assert rrc.sending_rows(inside / "b.db") == 0  # "an unreadable book counts 0"
+
+
+def test_a_windows_network_path_is_refused_for_the_sqlite_uri() -> None:
+    """The text ``Path.as_uri`` builds for a share has a host name after ``file://``; SQLite accepts only an empty one
+    or ``localhost`` (SQLite's documentation of its URI names), so the open cannot work: refuse it with a clear
+    message. Linux cannot run SQLite on Windows: only the URI text and the refusal are measured here.
+    """
+    from pathlib import PureWindowsPath
+
+    unc = r"\\server\share\x.db"
+    assert PureWindowsPath(unc).as_uri() == "file://server/share/x.db"
+    for text in (
+        unc,
+        "//server/share/x.db",
+        "\\/server\\share/x.db",  # mixed separators: ntpath treats them as a network path too
+        "/\\server/share/x.db",
+        "\\\\?\\UNC\\server\\share\\x.db",
+        "//?/UNC/server/share/x.db",
+        "\\\\.\\C:\\x.db",  # a device path and an extended-length local path: not a share, but refused too
+        "\\\\?\\C:\\x.db",
+        "\\\\localhost\\c$\\x.db",
+    ):
+        with pytest.raises(pc.PathRefused, match="device or network path"):
+            pc.readonly_sqlite_uri(text, ntpath)
+    # a relative name is made absolute first: in a current folder that is a share it builds a share path
+    in_a_share: Any = types.SimpleNamespace(splitroot=ntpath.splitroot, abspath=lambda _t: r"\\server\share\x.db")
+    with pytest.raises(pc.PathRefused, match="device or network path"):
+        pc._refuse_network_path("x.db", in_a_share)
+    pc._refuse_network_path("C" + r":\books\x.db", ntpath)  # a drive letter is fine
+    pc._refuse_network_path("//server/share/x.db")  # on this system it is an ordinary path
+
+
+# ---------- follow-up B: the fake model server's path options, the message and stream nits ----------
+
+
+def _fake_model_main(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> list[dict[str, Any]]:
+    """Run demo_only.fake_model_server.main() with these arguments, without a socket; returns what it handed to
+    make_model_server. A refusal is a SystemExit."""
+    from demo_only import fake_model_server as fms
+
+    handed: list[dict[str, Any]] = []
+
+    class _Stop(Exception):
+        pass
+
+    def fake_make(**kw: Any) -> Any:
+        handed.append(kw)
+        raise _Stop
+
+    monkeypatch.setattr(fms, "make_model_server", fake_make)
+    monkeypatch.setattr(sys, "argv", ["fake_model_server", "--port", "0", *argv])
+    try:
+        fms.main()
+    except _Stop:
+        pass
+    return handed
+
+
+@pytest.mark.parametrize("option", ["--call-log", "--control-file", "--key-file"])
+def test_fake_model_server_refuses_each_path_option_outside_the_allowed_folders(
+    jail: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], option: str
+) -> None:
+    _, outside = jail
+    (outside / "x.txt").write_text("fake-key-for-the-test\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as e:
+        _fake_model_main(monkeypatch, [option, str(outside / "x.txt")])
+    assert e.value.code == 2
+    err = capsys.readouterr().err
+    assert f"refused: {option}: path is outside" in err and pc.ROOTS_ENV in err
+    assert sorted(p.name for p in outside.iterdir()) == ["x.txt"]
+    with pytest.raises(SystemExit):  # a new file outside is not created either
+        _fake_model_main(monkeypatch, [option, str(outside / "new.txt")])
+    assert not (outside / "new.txt").exists()
+
+
+def test_fake_model_server_hands_the_checked_paths_on_and_reads_the_key_from_the_checked_file(
+    jail: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    inside, _ = jail
+    (inside / "k.txt").write_text("fake-key-for-the-test\n", encoding="utf-8")
+    argv = ["--key-file", "k.txt", "--call-log", "calls.jsonl", "--control-file", "mode.txt"]
+    handed = _fake_model_main(monkeypatch, argv)
+    assert handed == [
+        {
+            "port": 0,
+            "mode": "ok",
+            "key": "fake-key-for-the-test",
+            "call_log": inside.resolve() / "calls.jsonl",
+            "control_file": inside.resolve() / "mode.txt",
+        }
+    ]
+    with pytest.raises(SystemExit):  # a key file that does not exist is refused, not a traceback
+        _fake_model_main(monkeypatch, ["--key-file", "none.txt"])
+
+
+def test_n8n_api_import_message_names_the_rule_and_the_folder_list(
+    jail: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    inside, outside = jail
+    (outside / "wf.json").write_text(json.dumps({"name": "made-up"}), encoding="utf-8")
+    (inside / "key.txt").write_text("made-up-key-for-the-test\n", encoding="utf-8")
+    monkeypatch.setenv("N8N_API_KEY_FILE", str(inside / "key.txt"))
+    monkeypatch.setenv("N8N_URL", "http://127.0.0.1:1")
+    monkeypatch.syspath_prepend(str(REPO / "scripts"))
+    sys.modules.pop("n8n_api", None)
+    mod = importlib.import_module("n8n_api")
+    for target in (outside / "wf.json", inside / "missing.json"):
+        with pytest.raises(SystemExit) as e:
+            mod.main(["n8n_api.py", "import", str(target)])
+        msg = str(e.value.code)
+        assert "cannot read a workflow" in msg and "FILE:" in msg
+        assert "folder you started in" in msg and pc.ROOTS_ENV in msg
+        assert str(target) not in msg  # the path text is not echoed
+        assert msg.count(pc.ROOTS_ENV) == 1  # said once, not twice
+
+
+def test_scrub_script_started_without_pythonpath_refuses_a_missing_file_and_shows_usage(tmp_path: Path) -> None:
+    """Started as a script with no PYTHONPATH (the documented way to run it): a refusal and the usage text end with
+    exit code 2 and a message, never a traceback. Which stream each goes to is checked in-process, with capsys."""
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    script = str(REPO / "tools" / "scrub_n8n_export.py")
+    cases = (
+        ([str(tmp_path / "in.json"), str(tmp_path / "out.json")], "refused: in.json: no such file"),
+        ([], "usage: python -m tools.scrub_n8n_export"),
+    )
+    for args, start in cases:
+        proc = start_proc([script, *args], env)
+        proc.wait(timeout=60)
+        text = stop_proc(proc).decode("utf-8", "replace")
+        assert proc.returncode == 2 and text.startswith(start), text[-500:]
+    assert not (tmp_path / "out.json").exists()
+
+
+@pytest.mark.parametrize("bad", [None, 123, b"book.db"])
+def test_read_book_refuses_an_argument_that_is_not_a_path_instead_of_failing_on_its_name(bad: Any) -> None:
+    with pytest.raises(ci.InputError, match="not a path"):
+        ci.read_book(bad)
+    with pytest.raises(ci.InputError, match="not a path"):
+        ci.read_book(bad, anywhere=True)
+
+
+def test_read_book_label_shows_only_printable_characters(jail: tuple[Path, Path]) -> None:
+    with pytest.raises(ci.InputError) as err:
+        ci.read_book("x" + chr(0x202E) + "y" + chr(0x1B) + "[31m.db")  # a bidi mark and a control character
+    shown = str(err.value)
+    assert chr(0x1B) not in shown and chr(0x202E) not in shown and "book x" in shown
+
+
+def test_catcher_default_control_file_for_an_out_name_with_a_space(
+    jail: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A name with a space may exist (an existing file keeps its name) but cannot be a NEW file's name, so the default
+    ``<out>.mode`` was refused; the default now maps every character the helper does not allow to ``_``."""
+    from load_tools import catcher
+
+    served: list[tuple[Path, Path]] = []
+
+    async def fake_serve(host: str, port: int, out: Path, control: Path) -> None:
+        served.append((out, control))
+
+    monkeypatch.setattr(catcher, "serve", fake_serve)
+    inside, _ = jail
+    (inside / "my mail.jsonl").write_text("", encoding="utf-8")
+    catcher.main(["--out", "my mail.jsonl", "--port", "0"])
+    mode_name = catcher.default_control_name("my mail.jsonl")
+    assert served == [(inside.resolve() / "my mail.jsonl", inside.resolve() / mode_name)]
+    assert mode_name.startswith("my_mail.jsonl.") and mode_name.endswith(".mode")
+    assert catcher.default_control_name("plain.jsonl") == "plain.jsonl.mode"
+    # two output names that differ only in replaced characters never share one mode file
+    names = ["my mail.jsonl", "my_mail.jsonl", "bé.jsonl", "bè.jsonl", "a b.jsonl", "a?b.jsonl"]
+    assert len({catcher.default_control_name(n) for n in names}) == len(names)
+    assert all(re.fullmatch(r"[A-Za-z0-9._-]+", catcher.default_control_name(n)) for n in names)

@@ -27,6 +27,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import re
 import sys
 import time
 from email import policy
@@ -35,8 +36,13 @@ from pathlib import Path
 
 try:  # started as a script (python load_tools/catcher.py): the repository folder is not on the path yet
     from tools.pathconfine import PathRefused, confine
-except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+except ImportError:  # also a foreign `tools` package (another project's) that has no pathconfine
+    _repo = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(_repo))
+    for _name in [n for n in sys.modules if n == "tools" or n.startswith("tools.")]:
+        _file = getattr(sys.modules[_name], "__file__", None)  # a `tools` package of another project, already loaded
+        if _file is None or not Path(_file).resolve().is_relative_to(_repo):
+            del sys.modules[_name]
     from tools.pathconfine import PathRefused, confine
 
 BACKLOG = 1024
@@ -177,16 +183,32 @@ async def serve(host: str, port: int, out: Path, control: Path) -> None:
         await server.serve_forever()
 
 
+def default_control_name(out_name: str) -> str:
+    """The mode file next to ``out``: its name plus ``.mode``. A new file's name may only use letters, digits and
+    ``. _ -`` (tools/pathconfine.py), so every other character of ``out``'s name (a space, for one) becomes ``_``.
+    When a character was replaced, 8 hex characters of a hash of the whole original name are added, so two output
+    names that differ only in such characters (``my mail.jsonl`` and ``my_mail.jsonl``) never share one mode file."""
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", out_name)
+    if safe == out_name:
+        return out_name + ".mode"
+    return f"{safe}.{hashlib.sha256(out_name.encode('utf-8')).hexdigest()[:8]}.mode"
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", required=True, type=Path, help="JSONL file; one line per accepted message")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=2525, help="0 = pick a free port (printed on stdout)")
-    ap.add_argument("--control", type=Path, default=None, help="mode file (default: <out>.mode)")
+    ap.add_argument(
+        "--control",
+        type=Path,
+        default=None,
+        help="mode file (default: <out>.mode, other characters of the name become _)",
+    )
     args = ap.parse_args(argv)
     try:  # the same folders as the other load tools (tools/pathconfine.py); nothing is created when one is refused
         out = confine(args.out, what="--out")
-        control = confine(args.control or out.with_name(out.name + ".mode"), what="--control")
+        control = confine(args.control or out.with_name(default_control_name(out.name)), what="--control")
     except PathRefused as e:
         print(f"refused: {e}", file=sys.stderr)
         sys.exit(2)

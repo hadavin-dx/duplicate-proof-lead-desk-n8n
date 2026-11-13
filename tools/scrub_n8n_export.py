@@ -185,13 +185,13 @@ def main(argv: list[str]) -> int:
     try:
         _, src, dst = argv
     except ValueError:
-        print("usage: python -m tools.scrub_n8n_export in.json out.json")
+        print("usage: python -m tools.scrub_n8n_export in.json out.json", file=sys.stderr)
         return 2
     try:
         src_path = confine_existing(src, what="in.json")
         dst_path = confine(dst, what="out.json")
     except PathRefused as e:
-        print(f"refused: {e}")
+        print(f"refused: {e}", file=sys.stderr)
         return 2
     wf = json.loads(src_path.read_text(encoding="utf-8"))
     dst_path.write_text(json.dumps(scrub(wf), indent=2, ensure_ascii=False) + chr(10), encoding="utf-8")

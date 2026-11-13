@@ -11,6 +11,7 @@ import itertools
 import re
 import socket
 import sqlite3
+import sys
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -116,23 +117,34 @@ def test_desk_origin_and_the_addresses_built_from_it() -> None:
 # -- S5332 on the HTTP server: the bind rule lives in its own class ------------------------------------------
 
 
+class _SysWithPlatform:
+    """The ``sys`` module as the server module sees it, with only ``platform`` changed: patching ``sys.platform``
+    itself would change it for the whole process (every thread and every other module)."""
+
+    def __init__(self, platform: str) -> None:
+        self.platform = platform
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(sys, name)
+
+
 def test_the_windows_exclusive_bind_is_set_before_the_http_server_binds(monkeypatch: pytest.MonkeyPatch) -> None:
     assert server._Server.__mro__.index(server._ExclusiveBind) < server._Server.__mro__.index(
         server.ThreadingHTTPServer
     )
     calls: list[tuple[int, int, int]] = []
     option = 0x7FFF0001  # not a real option on this computer: the recorder takes it and does not pass it on
-    real = socket.socket.setsockopt
+    real: Any = socket.socket.setsockopt  # typed Any: the overloads of setsockopt take several argument shapes
 
     def record(self: socket.socket, level: int, name: int, value: Any, *rest: Any) -> None:
         if name == option:
             calls.append((level, name, value))
             return
-        real(self, level, name, value, *rest)  # type: ignore[call-overload]
+        real(self, level, name, value, *rest)
 
     monkeypatch.setattr(socket.socket, "setsockopt", record)
     monkeypatch.setattr(socket, "SO_EXCLUSIVEADDRUSE", option, raising=False)
-    monkeypatch.setattr(server.sys, "platform", "win32")
+    monkeypatch.setattr(server, "sys", _SysWithPlatform("win32"))
     srv = server._Server(("127.0.0.1", 0), server._Handler)
     try:
         assert calls == [(socket.SOL_SOCKET, option, 1)]
@@ -141,9 +153,30 @@ def test_the_windows_exclusive_bind_is_set_before_the_http_server_binds(monkeypa
         srv.server_close()
 
 
-def test_the_exclusive_bind_is_not_set_off_windows() -> None:
+def test_a_platform_stand_in_leaves_the_global_sys_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    real = sys.platform
+    monkeypatch.setattr(server, "sys", _SysWithPlatform("win32"))
+    assert server.sys.platform == "win32" and sys.platform == real  # only the server module sees the stand-in
+    assert server.sys.argv is sys.argv  # everything else is the real module
+
+
+def test_the_exclusive_bind_is_not_set_off_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[int] = []
+    option = 0x7FFF0001
+    real: Any = socket.socket.setsockopt  # typed Any: the overloads of setsockopt take several argument shapes
+
+    def record(self: socket.socket, level: int, name: int, value: Any, *rest: Any) -> None:
+        if name == option:
+            calls.append(name)
+            return
+        real(self, level, name, value, *rest)
+
+    monkeypatch.setattr(socket.socket, "setsockopt", record)
+    monkeypatch.setattr(socket, "SO_EXCLUSIVEADDRUSE", option, raising=False)
+    monkeypatch.setattr(server, "sys", _SysWithPlatform("linux"))
     srv = server._Server(("127.0.0.1", 0), server._Handler)
     try:
+        assert calls == []  # the option exists on this "computer" and was still not set
         assert srv.server_address[1] > 0
     finally:
         srv.server_close()
@@ -310,3 +343,38 @@ def test_the_server_class_order_and_a_real_double_bind_rebind_cycle() -> None:
         first.server_close()
     again = server._Server(("127.0.0.1", port), server._Handler)  # the port is free at once after the close
     again.server_close()
+
+
+# -- follow-up A: the scheme name is re-exported on purpose; the docstring says only what is true -----------
+
+
+def test_the_portal_demo_re_exports_the_scheme_name_explicitly() -> None:
+    """``from X import N`` alone is a private import under mypy strict (no implicit re-export); the demo module's
+    ``DESK_SCHEME`` must be written ``import ... as DESK_SCHEME`` (or listed in ``__all__``)."""
+    import ast
+
+    from demo_only import portal_demo
+
+    assert portal_demo.DESK_SCHEME is urls.DESK_SCHEME
+    tree = ast.parse(Path(portal_demo.__file__).read_text(encoding="utf-8"))
+    imports = [
+        a
+        for n in ast.walk(tree)
+        if isinstance(n, ast.ImportFrom) and n.module == "lead_desk.urls"
+        for a in n.names
+        if a.name == "DESK_SCHEME"
+    ]
+    assert len(imports) == 1 and imports[0].asname == "DESK_SCHEME"
+
+
+def test_the_urls_docstring_makes_no_claim_about_every_file() -> None:
+    """The text once said that no file writes the clear-text scheme as a literal. Files do (demo_only/, scripts/);
+    the smaller honest fix was to say so, not to scan them."""
+    doc = urls.__doc__ or ""
+    assert "no file writes" not in doc and "nothing is sent over a network" not in doc.lower()
+    assert "still write a literal" in doc
+    root = Path(__file__).resolve().parent.parent
+    literal = "http" + "://127.0.0.1"
+    assert any(literal in p.read_text(encoding="utf-8") for p in (root / "demo_only").glob("*.py")) or any(
+        literal in p.read_text(encoding="utf-8") for p in (root / "scripts").glob("*.py")
+    )

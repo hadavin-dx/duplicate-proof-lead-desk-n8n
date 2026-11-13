@@ -3,7 +3,9 @@
 # Usage: bash scripts/start_all.sh [keyed|blind]     (default keyed). Run from the repository root.
 # Needs bash (it uses [[ ]]): `sh scripts/start_all.sh` fails where sh is dash.
 # Ports and paths come from the desk configuration (DESK_* environment variables), not from this file.
-# Lead owner, lead stage and reminder are on with the demo file demo_only/leadflow.json and reminders to reminder@example.test unless you set DESK_LEADFLOW_FILE yourself; set DESK_LEADFLOW_FILE=off to turn them off.
+# Demo defaults, each used only when you did not set that variable (a value you set, even an empty one, is kept): DESK_LEADFLOW_FILE
+# is demo_only/leadflow.json, which turns on the lead owner, the lead stage and the reminder; and, unless DESK_LEADFLOW_FILE is
+# off or empty, DESK_NUDGE_TO is reminder@example.test. To turn them off, set DESK_LEADFLOW_FILE=off.
 # Logs and process ids go under the folder that holds the database file (git-ignored).
 set -eu
 # a feature test, not the name BASH_VERSION (dash takes any variable from the environment): only a shell that runs [[ ]] passes

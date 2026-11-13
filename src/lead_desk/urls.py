@@ -1,10 +1,12 @@
-"""The one place that writes the address of the desk or of its stand-ins.
+"""The one place that names the scheme of the desk's own address.
 
 The desk and the stand-ins speak plain HTTP on purpose: they run on this computer and listen on a loopback address
 (`Config.public_bind_problem` refuses a public bind when a real service is in use; `Config.problem` refuses a stand-ins
-host that is not loopback). Nothing is sent over a network, so there is nothing to encrypt. The scheme is therefore
-named once here, with this reason, and every address is built from it; no file writes the clear-text scheme as a
-literal, so a clear-text address elsewhere in the code stands out as a mistake."""
+host that is not loopback). The scheme is named once here, with this reason, and the addresses built by `desk_origin`
+use it. Not every address is built here: a few files (for example the demo code and the scripts) still write a literal
+loopback address of their own. No test checks those literal addresses; the one scan in tests (it looks for an
+address built from a host written in braces) does not cover them. Whoever writes an address for another host
+must use a secure scheme."""
 
 from __future__ import annotations
 
