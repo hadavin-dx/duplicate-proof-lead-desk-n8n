@@ -114,7 +114,11 @@ CONFIG_NAME = re.compile(r"[A-Z0-9_]+")  # a setting name: upper-case letters, d
 DRY_KEY = "dry-" + "key-" + "for-" + "self-" + "test"  # the made-up key of the fake HubSpot (built from parts)
 CRASH_REASON = "crash_while_sending"  # what the desk writes on a follow-up that was being sent when it stopped
 PRE_CRASH_DRAIN_SECONDS = 60.0  # wait for the first batch to settle before the crash is armed
-_ADDRESS = re.compile(r"[^\s,;:<>\"']+@[^\s,;<>\"']+")
+# An address starts where a run of address characters starts (the look-behind), so each run is read once. One character
+# is taken before the repeated part, and the repeated part cannot take an "@": the first "@" after the first character
+# is the one that splits the address, so nothing is tried two ways (the plain form costs n squared steps on a text of
+# n address characters, and a text with no "@" is the worst case). It finds the same text as the plain form.
+_ADDRESS = re.compile(r"(?<![^\s,;:<>\"'])[^\s,;:<>\"'][^\s,;:<>\"'@]*@[^\s,;<>\"']+")
 CRASH_POINT = "D2"  # after the sender answered and before the result is recorded: the worst moment for a blind sender
 MIN_READBACK_CALLS = 5  # fewest HubSpot calls the read-back may be given (a listing page, a few archives)
 MODEL_CALLS_PER_LEAD = 3  # the bound check 5 uses

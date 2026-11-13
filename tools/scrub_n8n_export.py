@@ -104,8 +104,14 @@ ACTIVE_LINK = re.compile(
 )
 # letters of any alphabet (\w is Unicode for str patterns) in the local part and the domain; @ or its full-width form.
 # The allowed domain must END there: the allowed name with more labels or letters after it is another, real domain.
+# One character, then the rest of the run taken possessively (Python 3.11 and later: taken once, never given back), so
+# the pattern cannot be tried from every character of a run as the plain "+" form is. In the look-ahead a label is taken
+# only when it does not itself start the allowed name, so the labels before "example.<ending>" and the allowed name
+# cannot be split two ways. It replaces the same text as the plain form (tests compare both on every short text).
 MAIL = re.compile(
-    r"(?<![\w.%+-])[\w.%+-]+[@\uFF20](?!(?:[\w-]+\.)*example\.(?:com|test|invalid)(?![\w-]|\.[\w-]))[\w.-]+"
+    r"(?<![\w.%+-])[\w.%+-][\w.%+-]*+[@\uFF20]"
+    r"(?!(?:(?!example\.(?:com|test|invalid)(?![\w-]|\.[\w-]))[\w-]++\.)*+example\.(?:com|test|invalid)(?![\w-]|\.[\w-]))"
+    r"[\w.-]++"
 )
 REPLACEMENT_URL = "http://localhost/REPLACE-ME"
 REPLACEMENT_MAIL = "someone@example.test"
