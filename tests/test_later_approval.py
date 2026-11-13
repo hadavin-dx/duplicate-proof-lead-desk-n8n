@@ -6,6 +6,8 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +28,8 @@ APPROVERS = (("appr-01", "Approver One (test)"), ("appr-02", "Approver Two (test
 HINT_D = desk_mod.HINTS["D"]
 SIX = ("item_id", *DECISION_KEYS)
 T = 1_700_000_000
+HALF_CLOSE_PAUSE_SECONDS = 0.25  # test hook: holds the server thread after the half-close
+DRAIN_WAIT_SECONDS = 5.0  # upper bound for the server thread to reach _drain after the client saw the whole reply
 
 
 def approval_rig(env: Any, **over: Any) -> Any:
@@ -582,13 +586,26 @@ def test_resolve_413_drains_the_unread_body_like_post_leads(env, monkeypatch: py
     from lead_desk import server
 
     drained: list[int] = []
+    done = threading.Event()
     real = server._Handler._drain
 
     def spy(self: Any, remaining: int) -> None:
         drained.append(remaining)
-        real(self, remaining)
+        try:
+            real(self, remaining)
+        finally:
+            done.set()
 
     monkeypatch.setattr(server._Handler, "_drain", spy)
+    # Force the unlucky order on every run: the client has read the whole reply and the end of the stream (the
+    # half-close) while the server thread has not yet reached _drain. A pause right after the half-close does this.
+    half_close = server._Handler._flush_and_half_close
+
+    def half_close_then_pause(self: Any) -> None:
+        half_close(self)
+        time.sleep(HALF_CLOSE_PAUSE_SECONDS)
+
+    monkeypatch.setattr(server._Handler, "_flush_and_half_close", half_close_then_pause)
     rig = approval_rig(env)
     rid = make_later(rig)
     base, port = _http(env, rig)
@@ -600,6 +617,9 @@ def test_resolve_413_drains_the_unread_body_like_post_leads(env, monkeypatch: py
         body=_padded_decision(70000),
     )
     assert got == (413, {"error": "too_large"})
+    # The client reads to the end of the reply, and the desk half-closes (that end) BEFORE it calls _drain: the server
+    # thread may not have reached _drain yet. Wait for it to finish (a bounded wait, not a sleep), then look.
+    assert done.wait(DRAIN_WAIT_SECONDS), "the resolve route never drained the unread body"
     assert drained == [70000]
 
 
