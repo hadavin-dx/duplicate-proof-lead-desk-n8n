@@ -27,8 +27,14 @@ from typing import Any
 
 try:  # started as a script (python load_tools/load_driver.py): the repository folder is not on the path yet
     from tools.pathconfine import PathRefused, confine
-except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+except ImportError:  # a foreign `tools` package WITHOUT these names is dropped and ours is used; a foreign
+    # `tools.pathconfine` with the SAME names is NOT detected (it is used as it is)
+    _repo = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(_repo))
+    for _name in [n for n in sys.modules if n == "tools" or n.startswith("tools.")]:
+        _file = getattr(sys.modules[_name], "__file__", None)  # a `tools` package of another project, already loaded
+        if _file is None or not Path(_file).resolve().is_relative_to(_repo):
+            del sys.modules[_name]
     from tools.pathconfine import PathRefused, confine
 
 FALLBACK_RETRY_VALUES = (
@@ -314,9 +320,10 @@ def _count_time_wait() -> int | None:
     return total if found else None
 
 
-def _read_int(path: str) -> int | None:
+def _read_int(kernel_file: str) -> int | None:
+    """One whole number from a fixed kernel file (/proc, /sys) named by this module, never by the command line."""
     try:
-        return int(Path(path).read_text(encoding="utf-8").strip())
+        return int(Path(kernel_file).read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
         return None
 

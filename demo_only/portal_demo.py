@@ -47,7 +47,7 @@ from lead_desk.constants import (
 from lead_desk.desk import Desk
 from lead_desk.hooks import HOOK_POINTS, FlagFileHooks
 from lead_desk.portal_api import connect_readonly
-from lead_desk.urls import DESK_SCHEME  # the one place that names the scheme (loopback only)
+from lead_desk.urls import DESK_SCHEME as DESK_SCHEME  # explicit re-export; names the scheme (loopback only)
 
 ASSET_TYPES: Final = {
     "portal_demo.js": "text/javascript; charset=utf-8",

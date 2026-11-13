@@ -1,5 +1,5 @@
 """Fake model server for drills: a local stand-in for the live model service (same request and reply shape as
-lead_desk.live_claude uses). Demo-only code. Standard library only. Never receives a real key.
+lead_desk.live_claude uses). Demo-only code. Standard library and tools/pathconfine.py only. Never receives a real key.
 Run: python -m demo_only.fake_model_server --mode ok --port 48767 [--key-file PATH] [--call-log FILE]
 Tests start it in a thread with make_model_server(port=0, mode=...). Change the mode while it runs with
 POST /control {"mode": "..."}; GET /stats shows the counters.
@@ -14,6 +14,12 @@ malformed_json = malformed, malformed_label = badlabel, server_error = r5xx.
 that is held for a timeout is logged after the hold: status 499 when the caller had already gone), for the invariant
 checker. `--control-file FILE` holds one mode word (or {"mode": ...}); it is read again on every call and wins over
 POST /control.
+The three path options are checked like the load tools' paths (tools/pathconfine.py): the file must lie in the folder
+you started in, the repository or the temporary folder, or in a folder listed in LEAD_DESK_PATH_ROOTS; a refused path
+exits with code 2 before the server starts. An outside path that worked before this check is now refused. Start it from
+the repository folder (``python -m demo_only.fake_model_server``): unlike the load tools it has no fallback for a start
+from elsewhere, and a ``tools`` package of another project that comes first on the import path stops the start with a
+traceback (ModuleNotFoundError): run it from the repository folder, without another project's ``tools`` on PYTHONPATH.
 Every POST /v1/messages counts as one call (`calls`), also failures. A request without the expected key header gets 401
 and counts in `auth_failures`; the key itself is never stored or printed."""
 
@@ -22,11 +28,14 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+
+from tools.pathconfine import PathRefused, confine, confine_existing
 
 MODES = ("ok", "mixed", "slow", "timeout", "r429", "malformed", "refusal", "r5xx", "badlabel", "drip")
 ALIASES = {"rate_limit": "r429", "malformed_json": "malformed", "malformed_label": "badlabel", "server_error": "r5xx"}
@@ -246,8 +255,15 @@ def main() -> None:
     ap.add_argument("--call-log", type=Path, default=None, help="one JSON line per call, for the invariant checker")
     ap.add_argument("--control-file", type=Path, default=None, help="file with one mode word, read on every call")
     a = ap.parse_args()
-    key = Path(a.key_file).read_text(encoding="utf-8").strip() if a.key_file else None
-    srv, state = make_model_server(port=a.port, mode=a.mode, key=key, call_log=a.call_log, control_file=a.control_file)
+    try:  # the same allowed folders as the load tools (tools/pathconfine.py)
+        key_path = confine_existing(a.key_file, what="--key-file") if a.key_file else None
+        call_log = confine(a.call_log, what="--call-log") if a.call_log else None
+        control_file = confine(a.control_file, what="--control-file") if a.control_file else None
+    except PathRefused as e:
+        print(f"refused: {e}", file=sys.stderr)
+        raise SystemExit(2) from None
+    key = key_path.read_text(encoding="utf-8").strip() if key_path else None
+    srv, state = make_model_server(port=a.port, mode=a.mode, key=key, call_log=call_log, control_file=control_file)
     print(f"fake model listening on port {srv.server_address[1]}", flush=True)
     try:
         srv.serve_forever()
