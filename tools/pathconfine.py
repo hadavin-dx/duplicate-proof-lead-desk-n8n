@@ -283,18 +283,30 @@ def confine_anywhere(path: str | os.PathLike[str], *, what: str) -> Path:
     return Path(_locate_existing(top, _parts(relative), what))
 
 
+_DEVICE_OR_NETWORK = (
+    "book path: a Windows device or network path (\\\\server\\share, \\\\?\\C:\\) cannot be opened read-only by SQLite"
+)
+
+
 def _refuse_network_path(text: str, path_module: ModuleType = os.path) -> None:
     """Refuse a Windows device or network path: ``\\\\server\\share\\...``, ``//server/share/...`` (also with the two
     separators mixed), ``\\\\?\\UNC\\...``, ``\\\\?\\C:\\...`` and ``\\\\.\\C:\\...``. ``path_module`` is ``os.path``;
     a test hands in ``ntpath``. The text is made absolute first (a relative name in a current folder that is a share
-    would build a share path). On Linux and macOS ``splitroot`` never reports a drive, so nothing is refused."""
+    would build a share path). Empty text and text with a control character (NUL, a new line, ...) are refused on every
+    system, and so is the Windows NT object path form ``\\??\\...`` (``ntpath`` keeps it as an ordinary root). On
+    Linux and macOS ``splitroot`` never reports a drive and the NT form is an ordinary file name, so no other path is
+    refused."""
+    if not text:
+        raise PathRefused("book path: the path is empty")
+    if any(ord(c) < 32 or ord(c) == 127 for c in text):
+        raise PathRefused("book path: contains a control character")
+    flat = text.replace("/", "\\")
+    if path_module.sep == "\\" and flat.startswith("\\??\\"):  # the NT object path form (\??\UNC\..., \??\C:\...)
+        raise PathRefused(_DEVICE_OR_NETWORK)
     # ntpath also treats a backslash-slash or slash-backslash start as a network path and returns it unchanged
     # (not normalised): compare in one form
     if path_module.splitroot(path_module.abspath(text))[0].replace("/", "\\")[:2] == "\\\\":
-        raise PathRefused(
-            "book path: a Windows device or network path (\\\\server\\share, \\\\?\\C:\\) cannot be opened "
-            "read-only by SQLite"
-        )
+        raise PathRefused(_DEVICE_OR_NETWORK)
 
 
 def readonly_sqlite_uri(path: str | os.PathLike[str], path_module: ModuleType = os.path) -> str:

@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 
-from tests.support import start_proc, stop_proc
+from support import start_proc, stop_proc
 
 REPO = Path(__file__).resolve().parents[1]
 

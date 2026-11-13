@@ -27,7 +27,8 @@ from typing import Any
 
 try:  # started as a script (python load_tools/load_driver.py): the repository folder is not on the path yet
     from tools.pathconfine import PathRefused, confine
-except ImportError:  # also a foreign `tools` package (another project's) that has no pathconfine
+except ImportError:  # a foreign `tools` package WITHOUT these names is dropped and ours is used; a foreign
+    # `tools.pathconfine` with the SAME names is NOT detected (it is used as it is)
     _repo = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(_repo))
     for _name in [n for n in sys.modules if n == "tools" or n.startswith("tools.")]:

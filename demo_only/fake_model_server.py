@@ -18,7 +18,8 @@ The three path options are checked like the load tools' paths (tools/pathconfine
 you started in, the repository or the temporary folder, or in a folder listed in LEAD_DESK_PATH_ROOTS; a refused path
 exits with code 2 before the server starts. An outside path that worked before this check is now refused. Start it from
 the repository folder (``python -m demo_only.fake_model_server``): unlike the load tools it has no fallback for a start
-from elsewhere, and a ``tools`` package of another project that comes first on the import path breaks the start.
+from elsewhere, and a ``tools`` package of another project that comes first on the import path stops the start with a
+traceback (ModuleNotFoundError): run it from the repository folder, without another project's ``tools`` on PYTHONPATH.
 Every POST /v1/messages counts as one call (`calls`), also failures. A request without the expected key header gets 401
 and counts in `auth_failures`; the key itself is never stored or printed."""
 

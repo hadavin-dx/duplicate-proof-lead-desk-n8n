@@ -49,7 +49,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
-try:  # started as a script (python tools/scrub_n8n_export.py): the repository folder is not on the path yet
+# Started as a script (python tools/scrub_n8n_export.py) the repository folder is not on the path yet. A `tools`
+# package of another project that comes first on the path is NOT handled here: the start stops with a traceback
+# (ModuleNotFoundError). Start it from the repository folder, without another project's `tools` on PYTHONPATH.
+try:
     from tools.pathconfine import PathRefused, confine, confine_existing
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))

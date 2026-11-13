@@ -39,7 +39,10 @@ from urllib.parse import urlsplit
 
 REPO = Path(__file__).resolve().parents[1]
 # insert(0) puts each entry first, so the entry added LAST ends up ahead: add the repository folder first, so that src
-# stays ahead of it (the same order as PYTHONPATH=src:. in the run commands)
+# stays ahead of it (the same order as PYTHONPATH=src:. in the run commands). That order holds only when neither folder
+# is on PYTHONPATH already (an entry that is already there is not moved). A `tools` package of another project that
+# comes first on the path stops the start with a traceback (ModuleNotFoundError or ImportError): start it from the
+# repository folder, without another project's `tools` on PYTHONPATH.
 for _p in (str(REPO), str(REPO / "src")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
