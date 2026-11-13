@@ -1526,11 +1526,46 @@ def test_the_sqlite_uri_check_decides_like_confine_existing_for_the_same_real_fi
     inside, _ = jail
     name, confine_accepts = _NAMES_FOR_THE_SAME_DECISION[label]
     book_path = inside / name
-    book_path.write_text("", encoding="utf-8")
+    try:
+        book_path.write_text("", encoding="utf-8")
+    except OSError:  # Windows cannot create a file whose name holds a C0 control character
+        pytest.skip("this system cannot create a file with this name")
     by_confine = _decision(pc.confine_existing, book_path, what="f")
     by_uri = _decision(pc.readonly_sqlite_uri, book_path)
     assert by_confine is confine_accepts, label
     assert by_uri is by_confine, label
+
+
+class _ChangingPath:
+    """A path object that answers differently on its second ``__fspath__`` call."""
+
+    def __init__(self, first: str, second: str) -> None:
+        self._answers = [first, second]
+        self.calls = 0
+
+    def __fspath__(self) -> str:
+        self.calls += 1
+        return self._answers[min(self.calls, 2) - 1]
+
+
+def test_the_sqlite_uri_is_built_from_the_checked_text_not_from_a_second_look_at_the_object(tmp_path: Path) -> None:
+    """The text that was checked is the text that is used: a path object that changes its answer after the first call
+    cannot get a different path past the refusals."""
+    good = tmp_path / "book.db"
+    other = tmp_path / "other.db"
+    changing = _ChangingPath(str(good), str(other))
+    uri = pc.readonly_sqlite_uri(changing)  # type: ignore[arg-type]
+    assert uri == good.absolute().as_uri() + "?mode=ro"
+    assert changing.calls == 1
+
+
+def test_a_lone_surrogate_is_a_plain_refusal_not_a_unicode_error(tmp_path: Path) -> None:
+    """Linux cannot encode a lone surrogate as a file name: the answer must be a PathRefused, never a
+    UnicodeEncodeError. Windows can encode it, and then the call simply returns."""
+    try:
+        pc.readonly_sqlite_uri(str(tmp_path) + "/a" + chr(0xD800) + "b.db")
+    except pc.PathRefused as refused:
+        assert "not a valid file name" in str(refused)
 
 
 # ---------- follow-up B: the fake model server's path options, the message and stream nits ----------

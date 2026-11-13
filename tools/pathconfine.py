@@ -87,7 +87,8 @@ MAX_NAME_CHARS = 255  # one file name of a NEW file
 ROOTS_ENV = "LEAD_DESK_PATH_ROOTS"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# C0 (U+0000-U+001F), DEL and C1 (U+0080-U+009F): NUL ends a name early in C code, the rest reorder or hide text
+# C0 (U+0000-U+001F), DEL and C1 (U+0080-U+009F): NUL ends a name early in C code, and no control character is part of
+# a legitimate book name (zero-width, bidi and line-separator characters are NOT refused here: names may hold them)
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 # the characters a NEW file's name may use, as a table: each character of the name is looked up here and the table's
 # own value is used, so the new name is built from this table and not copied from the argument
@@ -293,7 +294,7 @@ _DEVICE_OR_NETWORK = (
 )
 
 
-def _refuse_network_path(path: str | os.PathLike[str], path_module: ModuleType = os.path) -> None:
+def _refuse_network_path(path: str | os.PathLike[str], path_module: ModuleType = os.path) -> str:
     """Refuse a Windows device or network path: ``\\\\server\\share\\...``, ``//server/share/...`` (also with the two
     separators mixed), ``\\\\?\\UNC\\...``, ``\\\\?\\C:\\...`` and ``\\\\.\\C:\\...``. ``path_module`` is ``os.path``;
     a test hands in ``ntpath``. The text is made absolute first (a relative name in a current folder that is a share
@@ -311,6 +312,7 @@ def _refuse_network_path(path: str | os.PathLike[str], path_module: ModuleType =
     # (not normalised): compare in one form
     if path_module.splitroot(path_module.abspath(text))[0].replace("/", "\\")[:2] == "\\\\":
         raise PathRefused(_DEVICE_OR_NETWORK)
+    return text  # the caller must use ONLY this checked text: a path object may answer differently on a second call
 
 
 def readonly_sqlite_uri(path: str | os.PathLike[str], path_module: ModuleType = os.path) -> str:
@@ -318,5 +320,8 @@ def readonly_sqlite_uri(path: str | os.PathLike[str], path_module: ModuleType = 
     percent-encoded by ``Path.as_uri`` (a ``?`` or ``#`` in a file name cannot start a new option); the only text added
     is the fixed option, never a value from the caller. It does not check WHERE the file is: use it on the result of
     ``confine_existing`` or ``confine_anywhere``."""
-    _refuse_network_path(path, path_module)
-    return Path(path).absolute().as_uri() + "?mode=ro"
+    text = _refuse_network_path(path, path_module)
+    try:
+        return Path(text).absolute().as_uri() + "?mode=ro"
+    except UnicodeEncodeError as error:  # a lone surrogate cannot be written as a file name
+        raise PathRefused("book path: contains text that is not a valid file name") from error
