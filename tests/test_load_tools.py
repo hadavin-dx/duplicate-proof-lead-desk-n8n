@@ -279,6 +279,7 @@ def test_offenders_capped_at_ten(tmp_path: Path) -> None:
 
 
 def test_cli_exit_codes(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ci, "DRAIN_DIR", str(tmp_path), raising=False)  # probe: the drain marker is found by name here
     w = make_world()
     make_book(tmp_path / "desk.sqlite3", w["leads"])
 

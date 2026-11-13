@@ -12,10 +12,28 @@ import json
 import os
 import sqlite3
 import sys
+import tempfile
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
+
+from tools.pathconfine import PathRefused, confine, confine_existing
+
+# PROBE ONLY, DO NOT MERGE. Which flagged site has which shape is in PROBE-AB-V2-NOTE.md.
+PROBE_ROOTS_ENV = "LEAD_DESK_PATH_ROOTS"
+# PROBE shape NAME-ONLY: the drain marker is found by NAME in this folder
+DRAIN_DIR = str(Path(__file__).resolve().parent)
+
+
+def _probe_roots() -> list[str]:
+    """The allowed folders (real locations): current folder, repository, temporary folder, LEAD_DESK_PATH_ROOTS."""
+    extra = [r for r in os.environ.get(PROBE_ROOTS_ENV, "").split(os.pathsep) if r]
+    return [
+        os.path.realpath(r)
+        for r in (os.getcwd(), str(Path(__file__).resolve().parents[1]), tempfile.gettempdir(), *extra)
+    ]
+
 
 # ---- config block (the only place for numbers and words) ----
 FIRST_N = 10  # offending ids listed per check
@@ -58,6 +76,10 @@ class InputError(Exception):
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    try:  # PROBE shape SPLIT: helper for an existing file only (no new-name branch), environment roots
+        path = confine_existing(path, what="log file")
+    except PathRefused as e:
+        raise InputError(str(e)) from e
     rows: list[dict[str, Any]] = []
     try:
         text = path.read_text(encoding="utf-8")
@@ -78,8 +100,19 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
 
 def read_crm(path: Path) -> list[dict[str, Any]]:
     """Accepts the fakes server reply {"count", "rows": [...]} or a bare list of rows (each has lead_id)."""
+    try:  # PROBE-B shape: realpath, check against the allowed folders, refuse, then open the real path
+        real = os.path.realpath(path)
+        inside = any(
+            os.path.commonpath([os.path.normcase(real), os.path.normcase(root)]) == os.path.normcase(root)
+            for root in _probe_roots()
+        )
+    except (OSError, ValueError):  # a NUL or a loop in the path, or another drive
+        inside = False
+    if not inside:
+        raise InputError("--crm: path is outside the allowed folders")
     try:
-        obj = json.loads(path.read_text(encoding="utf-8"))
+        with open(real, encoding="utf-8") as fh:
+            obj = json.loads(fh.read())
     except (OSError, ValueError) as e:
         raise InputError(f"cannot read CRM dump {path.name}: {type(e).__name__}") from e
     rows = obj.get("rows") if isinstance(obj, dict) else obj
@@ -593,6 +626,10 @@ def render_table(result: Mapping[str, Any]) -> str:
 
 
 def _intended(path: Path) -> int:
+    try:  # PROBE shape COMBINED: the helper that also has the new-name branch
+        path = confine(path, what="--facts")
+    except PathRefused as e:
+        raise InputError(str(e)) from e
     try:
         return int(json.loads(path.read_text(encoding="utf-8"))["intended_requests"])
     except (OSError, ValueError, KeyError, TypeError) as e:
@@ -601,8 +638,19 @@ def _intended(path: Path) -> int:
 
 def _facts_say_live(path: Path) -> bool:
     """True when the driver's facts file records that the run's AI step was the live model (see load_driver.run)."""
+    try:  # PROBE-B shape: realpath, check against the allowed folders, refuse, then open the real path
+        real = os.path.realpath(path)
+        inside = any(
+            os.path.commonpath([os.path.normcase(real), os.path.normcase(root)]) == os.path.normcase(root)
+            for root in _probe_roots()
+        )
+    except (OSError, ValueError):  # a NUL or a loop in the path, or another drive
+        inside = False
+    if not inside:
+        return False  # a refused path counts as "not live"; main() then refuses it in _intended
     try:
-        return bool(json.loads(path.read_text(encoding="utf-8")).get("qualifier") == "live_claude")
+        with open(real, encoding="utf-8") as fh:
+            return bool(json.loads(fh.read()).get("qualifier") == "live_claude")
     except (OSError, ValueError, AttributeError):
         return False
 
@@ -610,8 +658,13 @@ def _facts_say_live(path: Path) -> bool:
 def _drain_marker(path: Path | None) -> float | None:
     if path is None:
         return None
+    # PROBE shape NAME-ONLY: only the name counts; the folder is the constant DRAIN_DIR
+    name = os.path.basename(str(path))
+    if name in ("", ".", ".."):
+        raise InputError("--drain: not a file name")
     try:
-        obj = json.loads(path.read_text(encoding="utf-8"))
+        with open(os.path.join(DRAIN_DIR, name), encoding="utf-8") as fh:
+            obj = json.loads(fh.read())
         value = obj.get("drained_ts")
     except (OSError, ValueError, AttributeError) as e:
         raise InputError(f"cannot read drain marker {path.name}: {type(e).__name__}") from e

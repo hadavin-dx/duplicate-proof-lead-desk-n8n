@@ -25,6 +25,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from tools.pathconfine import confine, confine_iter  # PROBE ONLY, DO NOT MERGE
+
 FALLBACK_RETRY_VALUES = (
     0.1,
     1.0,
@@ -346,6 +348,8 @@ def machine_facts() -> dict[str, Any]:
 def run(
     base_url: str, scenario: str, log: Path, facts_path: Path, workers: int, threads: int, seed: int, prefix: str
 ) -> dict[str, Any]:
+    log = confine_iter(log, what="--log")  # PROBE shape ITERATION table (new name by iteration over a constant)
+    facts_path = confine(facts_path, what="--facts")  # PROBE shape DICT table (new name from a dict)
     facts = machine_facts()
     t0 = time.time() + START_LEAD_SECONDS  # wall-clock: calendar stamp
     schedule = build_schedule(scenario, t0, prefix, seed)
