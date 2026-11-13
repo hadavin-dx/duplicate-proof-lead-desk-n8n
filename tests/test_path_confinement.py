@@ -21,11 +21,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from support import start_proc, stop_proc
 
 import tools.pathconfine as pc
 from load_tools import check_invariants as ci
 from load_tools import load_driver
-from support import start_proc, stop_proc
 from tools import scrub_n8n_export
 
 REPO = Path(__file__).resolve().parent.parent
@@ -1124,9 +1124,7 @@ SITES = [
 
 
 @pytest.mark.parametrize(("rel", "func", "helpers"), SITES)
-def test_the_listed_function_calls_the_helper_and_has_no_inline_guard(
-    rel: str, func: str, helpers: set[str]
-) -> None:
+def test_the_listed_function_calls_the_helper_and_has_no_inline_guard(rel: str, func: str, helpers: set[str]) -> None:
     tree = ast.parse((REPO / rel).read_text(encoding="utf-8"))
     node = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == func)
     called = {c.func.id for c in ast.walk(node) if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)}
@@ -1314,7 +1312,7 @@ def test_run_real_check_reads_a_network_path_book_as_unreadable_not_a_traceback(
     assert rrc.sending_rows(inside / "b.db") == 0  # "an unreadable book counts 0"
 
 
-def test_a_windows_network_path_is_refused_for_the_sqlite_uri() -> None:
+def test_sqlite_uri_refuses_a_share_path_and_names_the_reason() -> None:
     """The text ``Path.as_uri`` builds for a share has a host name after ``file://``; SQLite accepts only an empty one
     or ``localhost`` (SQLite's documentation of its URI names), so the open cannot work: refuse it with a clear
     message. Linux cannot run SQLite on Windows: only the URI text and the refusal are measured here.
@@ -1367,7 +1365,7 @@ _ALWAYS_REFUSED = [
 
 
 @pytest.mark.parametrize("text", _ALWAYS_REFUSED)
-def test_every_windows_device_or_network_form_is_refused_with_ntpath(text: str) -> None:
+def test_sqlite_uri_refuses_each_windows_device_or_network_form_on_ntpath(text: str) -> None:
     with pytest.raises(pc.PathRefused, match="Windows device or network path"):
         pc.readonly_sqlite_uri(text, ntpath)
 
@@ -1375,7 +1373,7 @@ def test_every_windows_device_or_network_form_is_refused_with_ntpath(text: str) 
 @pytest.mark.parametrize(
     ("text", "match"),
     [
-        ("", "the path is empty"),
+        ("", "empty path"),
         ("\x00", "control character"),
         ("a\x01b.db", "control character"),
         ("a\nb.db", "control character"),
@@ -1383,19 +1381,19 @@ def test_every_windows_device_or_network_form_is_refused_with_ntpath(text: str) 
     ],
 )
 @pytest.mark.parametrize("module", [ntpath, os.path], ids=["ntpath", "os.path"])
-def test_empty_and_control_character_text_is_refused_on_every_system(text: str, match: str, module: Any) -> None:
+def test_sqlite_uri_refuses_empty_and_control_character_text_on_any_system(text: str, match: str, module: Any) -> None:
     """Before: ``''`` built ``file:///<current folder>?mode=ro`` and NUL built ``file:///<folder>/%00?mode=ro``."""
     with pytest.raises(pc.PathRefused, match=match):
         pc.readonly_sqlite_uri(text, module)
 
 
 @pytest.mark.parametrize("text", ["C" + r":\books\x.db", "x.db", r"sub\x.db", "C" + ":/books/x.db", r"\x.db"])
-def test_ordinary_windows_forms_still_pass_with_ntpath(text: str) -> None:
+def test_sqlite_uri_keeps_ordinary_windows_paths_on_ntpath(text: str) -> None:
     uri = pc.readonly_sqlite_uri(text, ntpath)
     assert uri.startswith("file:///") and uri.endswith("?mode=ro")
 
 
-def test_on_this_system_the_uri_is_the_same_as_before(tmp_path: Path) -> None:
+def test_sqlite_uri_text_is_unchanged_for_normal_paths_on_this_system(tmp_path: Path) -> None:
     """Linux and macOS: a normal path, and the names that look like Windows shares, build the same text as before; the
     NT form is an ordinary file name there."""
     book = tmp_path / "my book#1.db"
@@ -1404,6 +1402,135 @@ def test_on_this_system_the_uri_is_the_same_as_before(tmp_path: Path) -> None:
     if os.name != "nt":
         for text in ("//host/share/x.db", r"\\host\share\x.db", r"\??\UNC\host\share\x"):
             assert pc.readonly_sqlite_uri(text) == Path(text).absolute().as_uri() + "?mode=ro", text
+
+
+@pytest.mark.parametrize("module", [ntpath, os.path], ids=["ntpath", "os.path"])
+@pytest.mark.parametrize(
+    "text",
+    [" ", "   ", "\t", "\u00a0", "\u2028", "\x85", "\x1c"],
+    ids=["space", "spaces", "tab", "no-break-space", "line-separator", "c1-next-line", "c0-separator"],
+)
+def test_sqlite_uri_refuses_blank_text_made_only_of_whitespace(text: str, module: Any) -> None:
+    with pytest.raises(pc.PathRefused, match="empty path"):
+        pc.readonly_sqlite_uri(text, module)
+
+
+@pytest.mark.parametrize("module", [ntpath, os.path], ids=["ntpath", "os.path"])
+@pytest.mark.parametrize("char", ["\x80", "\x85", "\x8d", "\x9b", "\x9f"], ids=lambda c: f"U+{ord(c):04X}")
+def test_sqlite_uri_refuses_a_c1_control_character_inside_a_name(char: str, module: Any) -> None:
+    with pytest.raises(pc.PathRefused, match="control character"):
+        pc.readonly_sqlite_uri(f"a{char}b.db", module)
+
+
+@pytest.mark.parametrize("module", [ntpath, os.path], ids=["ntpath", "os.path"])
+@pytest.mark.parametrize(
+    "value",
+    [None, 12, 1.5, b"book.db", bytearray(b"book.db"), ["book.db"], object()],
+    ids=["none", "int", "float", "bytes", "bytearray", "list", "object"],
+)
+def test_sqlite_uri_refuses_a_value_that_is_not_a_path_plainly(value: Any, module: Any) -> None:
+    """Before: ``bytes`` and the like ended in a ``TypeError`` from a later step instead of the usual refusal."""
+    with pytest.raises(pc.PathRefused, match="not a path"):
+        pc.readonly_sqlite_uri(value, module)
+
+
+def test_sqlite_uri_refuses_a_path_object_that_gives_bytes_and_a_text_that_is_too_long() -> None:
+    class _BytesPath:
+        def __fspath__(self) -> Any:
+            return b"book.db"
+
+    with pytest.raises(pc.PathRefused, match="empty path"):  # the same message confine gives for it
+        pc.readonly_sqlite_uri(_BytesPath())  # type-checked by the shape rule, not by a later TypeError
+    with pytest.raises(pc.PathRefused, match="path too long"):
+        pc.readonly_sqlite_uri("a" * (pc.MAX_PATH_CHARS + 1))
+
+
+def test_sqlite_uri_accepts_a_path_object_and_a_text_alike() -> None:
+    class _TextPath:
+        def __fspath__(self) -> str:
+            return "book.db"
+
+    expect = Path("book.db").absolute().as_uri() + "?mode=ro"
+    assert pc.readonly_sqlite_uri(Path("book.db")) == expect
+    assert pc.readonly_sqlite_uri("book.db") == expect
+    assert pc.readonly_sqlite_uri(_TextPath()) == expect
+
+
+@pytest.mark.parametrize(
+    "name", ["a\u00a0b.db", "a\u2028b.db", "a\u3000b.db", "a\u200db.db", "caf\u00e9.db", "\U0001f600.db"]
+)
+def test_sqlite_uri_keeps_a_name_with_a_space_like_or_invisible_character_that_confine_accepts(name: str) -> None:
+    """Same rule as ``confine``: only C0, DEL and C1 controls are refused. A name that ``confine_existing`` lets
+    through is not refused here (the plain ``isprintable()`` test would refuse these and break such a book)."""
+    uri = pc.readonly_sqlite_uri(name)
+    assert uri == Path(name).absolute().as_uri() + "?mode=ro"
+
+
+def _make_book(path: Path) -> None:
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        "CREATE TABLE receipts (receipt_id INTEGER, source TEXT, source_ref TEXT, outcome TEXT);"
+        "CREATE TABLE leads (lead_id TEXT, email_key TEXT, email TEXT, name TEXT);"
+        "CREATE TABLE followups (lead_id TEXT, state TEXT, crm_done INTEGER, updated_at INTEGER, last_error TEXT);"
+        "INSERT INTO receipts VALUES (1, 'form', 'r1', 'new');"
+        "INSERT INTO leads VALUES ('L1', 'k', 'a@example.test', 'A');"
+        "INSERT INTO followups VALUES ('L1', 'sent', 1, 7, NULL);"
+    )
+    conn.commit()
+    conn.close()
+
+
+@pytest.mark.parametrize("anywhere", [False, True])
+def test_a_path_object_with_a_normal_name_passes_the_uri_check_and_a_real_book_is_read(
+    jail: tuple[Path, Path], anywhere: bool
+) -> None:
+    """The real caller (``check_invariants.read_book``) hands ``readonly_sqlite_uri`` a ``Path`` (the result of
+    ``confine_existing``), not a ``str``: a path object has to keep working, also through a real SQLite file."""
+    inside, _ = jail
+    for name in ("book.db", "my book.db", "caf\u00e9.db"):
+        book_path = inside / name
+        _make_book(book_path)
+        assert pc.readonly_sqlite_uri(book_path) == book_path.absolute().as_uri() + "?mode=ro"
+        book = ci.read_book(book_path, anywhere=anywhere)
+        assert book["leads"] == ["L1"] and book["new_receipts"] == 1, name
+
+
+def _decision(call: Any, *args: Any, **kwargs: Any) -> bool:
+    """True when the helper accepts, False when it refuses."""
+    try:
+        call(*args, **kwargs)
+    except pc.PathRefused:
+        return False
+    return True
+
+
+# name -> what confine_existing decides for a real file of that name (the test also checks the helper itself)
+_NAMES_FOR_THE_SAME_DECISION = {
+    "no-break space": ("a\u00a0b.db", True),
+    "zero-width joiner": ("a\u200db.db", True),
+    "ideographic space": ("a\u3000b.db", True),
+    "zero-width space": ("a\u200bb.db", True),
+    "a C0 control character": ("a\x01b.db", False),
+    "a new line": ("a\nb.db", False),
+    "a C1 control character": ("a\x85b.db", False),
+    "DEL": ("a\x7fb.db", False),
+}
+
+
+@pytest.mark.parametrize("label", sorted(_NAMES_FOR_THE_SAME_DECISION))
+def test_the_sqlite_uri_check_decides_like_confine_existing_for_the_same_real_file(
+    jail: tuple[Path, Path], label: str
+) -> None:
+    """No divergence: for a real file with this name, ``readonly_sqlite_uri`` accepts exactly when ``confine_existing``
+    accepts (the invisible spacing characters pass both; every control character is refused by both)."""
+    inside, _ = jail
+    name, confine_accepts = _NAMES_FOR_THE_SAME_DECISION[label]
+    book_path = inside / name
+    book_path.write_text("", encoding="utf-8")
+    by_confine = _decision(pc.confine_existing, book_path, what="f")
+    by_uri = _decision(pc.readonly_sqlite_uri, book_path)
+    assert by_confine is confine_accepts, label
+    assert by_uri is by_confine, label
 
 
 # ---------- follow-up B: the fake model server's path options, the message and stream nits ----------

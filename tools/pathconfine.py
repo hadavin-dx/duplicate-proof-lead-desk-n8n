@@ -58,10 +58,15 @@ system reports it.
 
 ``readonly_sqlite_uri`` builds the connection string for a read-only SQLite file from a path that one of the three
 functions returned: the path, percent-encoded by ``Path.as_uri`` (a ``?`` or ``#`` in a file name cannot start a new
-option), plus the fixed option ``mode=ro``. A Windows network or device path
-(``\\\\server\\share\\x.db``, ``\\\\?\\C:\\x.db``) is refused:
-``Path.as_uri`` turns it into ``file://server/share/x.db``, and SQLite accepts only an empty or ``localhost`` name
-after ``file://`` (SQLite's documentation of its URI names), so the read-only open could not work. Copy the book to a
+option), plus the fixed option ``mode=ro``. Refused, with ``PathRefused`` and a message that never prints the value:
+anything that is not a path (None, a number, ``bytes``); empty or blank text; a control character (C0, DEL, C1); text
+longer than ``MAX_PATH_CHARS``; and, when the Windows path rules apply, a network or device path:
+``\\\\server\\share\\x.db`` and ``//server/share/x.db`` (also with the two separators mixed),
+``\\\\?\\UNC\\...``, ``\\\\?\\C:\\...``,
+``\\\\.\\C:\\...`` and the NT object path form ``\\??\\...``. ``Path.as_uri`` turns a share path into
+``file://server/share/x.db``, and SQLite accepts only an empty or ``localhost`` name after ``file://`` (SQLite's
+documentation of its URI names), so the read-only open could not work. Every other path, on every system, builds the
+same text as before. Copy the book to a
 local drive (a mapped network drive is probably refused too: Windows reports it by its network name; not measured).
 What is NOT measured: the behaviour of SQLite on Windows itself (this was tested on Linux, on the URI text only).
 """
@@ -288,20 +293,19 @@ _DEVICE_OR_NETWORK = (
 )
 
 
-def _refuse_network_path(text: str, path_module: ModuleType = os.path) -> None:
+def _refuse_network_path(path: str | os.PathLike[str], path_module: ModuleType = os.path) -> None:
     """Refuse a Windows device or network path: ``\\\\server\\share\\...``, ``//server/share/...`` (also with the two
     separators mixed), ``\\\\?\\UNC\\...``, ``\\\\?\\C:\\...`` and ``\\\\.\\C:\\...``. ``path_module`` is ``os.path``;
     a test hands in ``ntpath``. The text is made absolute first (a relative name in a current folder that is a share
-    would build a share path). Empty text and text with a control character (NUL, a new line, ...) are refused on every
-    system, and so is the Windows NT object path form ``\\??\\...`` (``ntpath`` keeps it as an ordinary root). On
-    Linux and macOS ``splitroot`` never reports a drive and the NT form is an ordinary file name, so no other path is
-    refused."""
-    if not text:
-        raise PathRefused("book path: the path is empty")
-    if any(ord(c) < 32 or ord(c) == 127 for c in text):
-        raise PathRefused("book path: contains a control character")
+    would build a share path). The shape is checked first, with the same rule as ``confine`` (``_text``), on every
+    system: only a text (``str``) or a path object is accepted; empty or blank text, a control character (C0, DEL or C1,
+    for example NUL or a new line) and a text longer than ``MAX_PATH_CHARS`` are refused, and so is anything that is not
+    a path (None, a number, ``bytes``). The Windows NT object path form ``\\??\\...`` is refused too (``ntpath`` keeps
+    it as an ordinary root). On Linux and macOS ``splitroot`` never reports a drive and the NT form is an ordinary file
+    name, so no other path is refused."""
+    text = _text(path, "book path")
     flat = text.replace("/", "\\")
-    if path_module.sep == "\\" and flat.startswith("\\??\\"):  # the NT object path form (\??\UNC\... and \??\ plus a drive path)
+    if path_module.sep == "\\" and flat.startswith("\\??\\"):  # the NT object path form (\??\UNC\..., \??\ and a drive)
         raise PathRefused(_DEVICE_OR_NETWORK)
     # ntpath also treats a backslash-slash or slash-backslash start as a network path and returns it unchanged
     # (not normalised): compare in one form
@@ -314,5 +318,5 @@ def readonly_sqlite_uri(path: str | os.PathLike[str], path_module: ModuleType = 
     percent-encoded by ``Path.as_uri`` (a ``?`` or ``#`` in a file name cannot start a new option); the only text added
     is the fixed option, never a value from the caller. It does not check WHERE the file is: use it on the result of
     ``confine_existing`` or ``confine_anywhere``."""
-    _refuse_network_path(os.fspath(path), path_module)
+    _refuse_network_path(path, path_module)
     return Path(path).absolute().as_uri() + "?mode=ro"
