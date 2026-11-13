@@ -18,6 +18,7 @@ import re
 import select
 import signal
 import socket
+import socketserver
 import sys
 import threading
 import time
@@ -89,6 +90,7 @@ from lead_desk.desk import Desk, DeskSettingRefused, Reply
 from lead_desk.envnum import SettingRefused
 from lead_desk.hooks import Hooks
 from lead_desk.loader import DemoPortal, KnowsBoundAddress, load_approvers, load_demo_adapters, load_demo_portal
+from lead_desk.urls import desk_origin
 
 try:
     import resource  # not on Windows
@@ -294,7 +296,23 @@ class _Lingerer:
             self._drop(s)
 
 
-class _Server(ThreadingHTTPServer):
+class _ExclusiveBind(socketserver.TCPServer):
+    """Windows: a second listener must not share the port (SO_EXCLUSIVEADDRUSE, set before the bind). Kept apart from
+    the HTTP server class: it is a socket rule, not an HTTP one, and it runs before the HTTP server's own bind step."""
+
+    def server_bind(self) -> None:
+        if sys.platform == "win32":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
+class _ExclusiveHTTPServer(_ExclusiveBind, ThreadingHTTPServer):
+    """The HTTP server with the Windows bind rule in front of it (class order: this, _ExclusiveBind,
+    ThreadingHTTPServer). It adds nothing of its own; `_Server` below extends it, so the class that carries the desk's
+    own methods does not list the HTTP server as a base."""
+
+
+class _Server(_ExclusiveHTTPServer):
     allow_reuse_address = os.name != "nt"  # on Windows SO_REUSEADDR would allow a second listener on the same port
     request_queue_size = LISTEN_QUEUE
     desk: Desk
@@ -485,11 +503,6 @@ class _Server(ThreadingHTTPServer):
             if is_fd_exhaustion(e):
                 time.sleep(ACCEPT_PAUSE_SECONDS)
             raise
-
-    def server_bind(self) -> None:
-        if sys.platform == "win32":
-            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-        super().server_bind()
 
 
 def _allowed_hosts(config: Config) -> frozenset[str]:
@@ -730,7 +743,7 @@ class _Handler(BaseHTTPRequestHandler):
         origins = self.headers.get_all("Origin", [])
         if origins:
             port = server.server_address[1]
-            if len(origins) != 1 or origins[0] not in {f"http://{h}:{port}" for h in server.allowed_hosts}:
+            if len(origins) != 1 or origins[0] not in {desk_origin(h, port) for h in server.allowed_hosts}:
                 return "forbidden_origin"
         fetch_site = self.headers.get_all("Sec-Fetch-Site", [])
         if fetch_site and (len(fetch_site) != 1 or fetch_site[0].strip().lower() not in SAME_SITE_VALUES):
@@ -1032,7 +1045,7 @@ def serve_in_thread(desk: Desk, port: int = 0) -> tuple[str, Callable[[], None]]
         thread.join(timeout=REQUEST_TIMEOUT_SECONDS)
 
     host, bound = server.server_address[0], server.server_address[1]
-    return f"http://{host!s}:{bound}", stop
+    return desk_origin(str(host), bound), stop
 
 
 class DescriptorBudgetError(ValueError):
@@ -1191,7 +1204,7 @@ def main(hooks: Hooks | None = None) -> None:
                 flush=True,
             )
         host, port = server.server_address[0], server.server_address[1]
-        print(f"desk listening on http://{host!s}:{port}", flush=True)
+        print(f"desk listening on {desk_origin(str(host), port)}", flush=True)
         server.serve_forever()
     except KeyboardInterrupt:
         pass

@@ -55,6 +55,7 @@ from lead_desk.constants import (
 )
 from lead_desk.envnum import SettingRefused, env_number, split_url
 from lead_desk.identity import PLAIN_ADDRESS, encodable, has_control_char
+from lead_desk.urls import desk_origin
 
 _LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 _HOST_NAME = re.compile(rf"^{_LABEL}(?:\.{_LABEL})*$|^\[[0-9a-f:]+\]$")
@@ -443,8 +444,8 @@ class Config:
 
     @property
     def fakes_url(self) -> str:
-        """Built from host and port; there is no URL literal."""
-        return f"http://{self.fakes_host}:{self.fakes_port}"
+        """Built from host and port by lead_desk.urls (the stand-ins are loopback only; see Config.problem)."""
+        return desk_origin(self.fakes_host, self.fakes_port)
 
     @property
     def real_services(self) -> tuple[str, ...]:

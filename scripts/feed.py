@@ -21,6 +21,7 @@ from http_guard import open_http
 
 from lead_desk.config import Config
 from lead_desk.constants import SOURCES
+from lead_desk.urls import desk_origin
 
 CANNED = Path("demo_only") / "canned_leads.json"
 
@@ -62,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--source", choices=SOURCES, required=True)
     ap.add_argument("--index", type=int, help="position in canned_leads.json, starting at 1")
     ap.add_argument("--all", action="store_true", help="send every canned lead once")
-    ap.add_argument("--url", default=f"http://{target_host(cfg.bind)}:{cfg.port}/leads")
+    ap.add_argument("--url", default=f"{desk_origin(target_host(cfg.bind), cfg.port)}/leads")
     args = ap.parse_args(argv)
     if args.all == (args.index is not None):
         ap.error("give exactly one of --index or --all")

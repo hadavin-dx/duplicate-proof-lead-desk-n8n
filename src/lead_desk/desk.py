@@ -2066,7 +2066,7 @@ class Desk:
         conn = self._conn()
         now = self._now()
 
-        def attempt() -> int:
+        def attempt() -> tuple[int, bool]:  # (rows changed, did the `sent` result also move the lead stage)
             with self._write(conn):
                 rc = conn.execute(
                     "UPDATE followups SET state=?, last_error=?, updated_at=?, sent_at=?,"
@@ -2082,14 +2082,9 @@ class Desk:
                         token,
                     ),
                 ).rowcount
-                moved.clear()
-                if rc == 1 and state == "sent" and self._mark_contacted(conn, lead_id, now):
-                    moved.append(True)
-                return rc
+                return rc, rc == 1 and state == "sent" and self._mark_contacted(conn, lead_id, now)
 
-        moved: list[bool] = []
-        self._finish_update(attempt, "record_send_result")
-        if moved:
+        if self._finish_update_moved(attempt, "record_send_result"):
             self._mirror_not_before.clear(lead_id)  # (the rank in the entry already ignores it; this frees the slot)
 
     def _mark_contacted(self, conn: sqlite3.Connection, lead_id: str, now: int) -> bool:
@@ -2146,15 +2141,31 @@ class Desk:
             return self._error_reply(e, None, with_receipt=False)
 
     def _finish_update(self, attempt: Callable[[], int], what: str) -> None:
+        self._finish_with(attempt, what, lambda changed: changed)
+
+    def _finish_update_moved(self, attempt: Callable[[], tuple[int, bool]], what: str) -> bool:
+        """`_finish_update` for an attempt that also says something about the write (here: did the lead stage move).
+        Returns that second value of the try that committed; False when the database stayed locked (nothing was
+        recorded, so nothing moved). The value is the return value of the last try, never carried over from an earlier
+        one."""
+        outcome = self._finish_with(attempt, what, lambda result: result[0])
+        return outcome is not None and outcome[1]
+
+    def _finish_with(self, attempt: Callable[[], _T], what: str, rows: Callable[[_T], int]) -> _T | None:
+        """The shared part: run `attempt` itself through `_locked_retry` (never a wrapper around it, so a test that
+        picks a fault by the attempt's own name, `tests/support.py is_write`, sees the caller's function), swallow a
+        locked database with a log line (None back), warn when the row count `rows(result)` is not one."""
         try:
-            changed = self._locked_retry(attempt)
+            result = self._locked_retry(attempt)
         except sqlite3.OperationalError as e:
             if db.is_busy(e):
                 log.warning("%s: database stayed locked; the row stays as it was and shows as stalled", what)
-                return
+                return None
             raise
+        changed = rows(result)
         if changed != 1:
             log.warning("%s: expected one row, changed %d", what, changed)
+        return result
 
     # -- review items, retry, resolve
     def _find_item(self, item_id: str) -> str | None:

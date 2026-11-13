@@ -47,6 +47,7 @@ from lead_desk.constants import (
 from lead_desk.desk import Desk
 from lead_desk.hooks import HOOK_POINTS, FlagFileHooks
 from lead_desk.portal_api import connect_readonly
+from lead_desk.urls import DESK_SCHEME  # the one place that names the scheme (loopback only)
 
 ASSET_TYPES: Final = {
     "portal_demo.js": "text/javascript; charset=utf-8",
@@ -74,7 +75,6 @@ ERR_CRASH_UNAVAILABLE: Final = "crash_unavailable"
 ERR_IN_PROGRESS: Final = "burst_in_progress"
 ERR_TOO_SOON: Final = "burst_too_soon"
 ERR_BUDGET: Final = "burst_budget_used"
-DESK_SCHEME: Final = "http"
 # Most requests (counted by slots) one PortalDemo instance may send through `burst` in its lifetime:
 # the lead book grows by at most this many rows.
 BURST_BUDGET_REQUESTS: Final = 500

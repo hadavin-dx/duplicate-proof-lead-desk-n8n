@@ -11,8 +11,13 @@ from lead_desk.constants import COMPANY_MAX, EMAIL_MAX, MESSAGE_MAX, NAME_MAX, P
 
 # The apostrophe is a legal character of the part before the @ (RFC 5322 atext); it stays out of the domain.
 # one plain address: no list, comment or quote characters (the sender kinds and the reminder address use it)
-PLAIN_ADDRESS = re.compile(r'^[^\s<>\r\n\x00,;"()]+@[^\s<>\r\n\x00,;"()]+$')
-_EMAIL_RE = re.compile(r"[^@\s<>\",;]+@[^@\s<>\"',;]+\.[^@\s<>\"',;]+")
+# Same strings as the plain "something@something" pattern, written so that no character can be read two ways (the
+# plain form backtracks over every "@" and costs n squared steps on a long non-matching text): one character, then
+# characters that are not "@", then the first "@" after the first character, then one or more address characters.
+PLAIN_ADDRESS = re.compile(r'^[^\s<>\r\n\x00,;"()][^\s<>\r\n\x00,;"()@]*@[^\s<>\r\n\x00,;"()]+$')
+# local part, "@", then a domain that has a dot with a character before it and one after it: one character, characters
+# that are not dots, the first dot, one or more characters (the dot is found once, not by backtracking)
+_EMAIL_RE = re.compile(r"^[^@\s<>\",;]+@[^@\s<>\"',;][^@\s<>\"',;.]*\.[^@\s<>\"',;]+$")
 _CONTROL_OK_IN_MESSAGE = frozenset("\t\n\r")
 _FIELD_LIMITS: tuple[tuple[str, int | None], ...] = (  # fixed order; email has no length rule here (its rule is below)
     ("name", NAME_MAX),
