@@ -25,6 +25,12 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+try:  # started as a script (python load_tools/load_driver.py): the repository folder is not on the path yet
+    from tools.pathconfine import PathRefused, confine
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from tools.pathconfine import PathRefused, confine
+
 FALLBACK_RETRY_VALUES = (
     0.1,
     1.0,
@@ -346,6 +352,8 @@ def machine_facts() -> dict[str, Any]:
 def run(
     base_url: str, scenario: str, log: Path, facts_path: Path, workers: int, threads: int, seed: int, prefix: str
 ) -> dict[str, Any]:
+    log = confine(log, what="--log")  # the real location, checked; the part files and the writes below use only this
+    facts_path = confine(facts_path, what="--facts")
     facts = machine_facts()
     t0 = time.time() + START_LEAD_SECONDS  # wall-clock: calendar stamp
     schedule = build_schedule(scenario, t0, prefix, seed)
@@ -403,7 +411,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {e}", file=sys.stderr)
         return 2
     facts = a.facts or a.log.with_name(a.log.name + ".facts.json")
-    summary = run(a.base_url, a.scenario, a.log, facts, a.workers, a.threads, a.seed, a.id_prefix)
+    try:
+        summary = run(a.base_url, a.scenario, a.log, facts, a.workers, a.threads, a.seed, a.id_prefix)
+    except PathRefused as e:  # the same wording and exit code as a bad scenario: nothing was sent or written
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
     print(json.dumps(summary, sort_keys=True))
     return 0
 

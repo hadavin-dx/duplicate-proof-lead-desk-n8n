@@ -17,6 +17,12 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+try:  # started as a script (python load_tools/check_invariants.py): the repository folder is not on the path yet
+    from tools.pathconfine import PathRefused, confine, confine_anywhere, confine_existing, readonly_sqlite_uri
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from tools.pathconfine import PathRefused, confine, confine_anywhere, confine_existing, readonly_sqlite_uri
+
 # ---- config block (the only place for numbers and words) ----
 FIRST_N = 10  # offending ids listed per check
 DEFAULT_MODEL_CALL_BOUND = 3  # check 5: most model calls allowed for one lead
@@ -57,7 +63,21 @@ class InputError(Exception):
     """An input file is missing or not in the documented format."""
 
 
+def _confined(path: Path | str, what: str, *, output: bool = False) -> Path:
+    """The checked real location of a command-line path (tools/pathconfine.py); a refusal is an input error. Used by
+    ``main`` to refuse a bad path before anything is read or written; every function below that opens a file checks
+    the path again itself (the result of a check is stable: the listing's own path)."""
+    try:
+        return confine(path, what=what) if output else confine_existing(path, what=what)
+    except PathRefused as e:
+        raise InputError(str(e)) from e
+
+
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    try:  # a file that is read: it must exist and lie in an allowed folder (tools/pathconfine.py)
+        path = confine_existing(path, what="log file")
+    except PathRefused as e:
+        raise InputError(str(e)) from e
     rows: list[dict[str, Any]] = []
     try:
         text = path.read_text(encoding="utf-8")
@@ -79,6 +99,10 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
 def read_crm(path: Path) -> list[dict[str, Any]]:
     """Accepts the fakes server reply {"count", "rows": [...]} or a bare list of rows (each has lead_id)."""
     try:
+        path = confine_existing(path, what="CRM dump")
+    except PathRefused as e:
+        raise InputError(str(e)) from e
+    try:
         obj = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
         raise InputError(f"cannot read CRM dump {path.name}: {type(e).__name__}") from e
@@ -88,12 +112,21 @@ def read_crm(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def read_book(path: Path) -> dict[str, Any]:
-    """Read-only look at the desk's SQLite book."""
+def read_book(path: Path, *, anywhere: bool = False) -> dict[str, Any]:
+    """Read-only look at the desk's SQLite book. The path must lie in an allowed folder (tools/pathconfine.py);
+    ``anywhere=True`` is for scripts/run_real_check.py, which reads the book that its own settings file names, kept
+    outside the repository on purpose (docs/real-services.md)."""
+    try:
+        if anywhere:
+            path = confine_anywhere(path, what=f"book {path.name}")
+        else:
+            path = confine_existing(path, what=f"book {path.name}")
+    except PathRefused as e:
+        raise InputError(str(e)) from e
     if not path.is_file():
         raise InputError(f"no such book: {path.name}")
     try:
-        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        conn = sqlite3.connect(readonly_sqlite_uri(path), uri=True)
         try:
             receipts = {
                 (s, r): int(i) for i, s, r in conn.execute("SELECT receipt_id, source, source_ref FROM receipts")
@@ -594,6 +627,10 @@ def render_table(result: Mapping[str, Any]) -> str:
 
 def _intended(path: Path) -> int:
     try:
+        path = confine_existing(path, what="--facts")
+    except PathRefused as e:
+        raise InputError(str(e)) from e
+    try:
         return int(json.loads(path.read_text(encoding="utf-8"))["intended_requests"])
     except (OSError, ValueError, KeyError, TypeError) as e:
         raise InputError(f"cannot read the driver facts {path.name} (intended_requests): {type(e).__name__}") from e
@@ -601,6 +638,10 @@ def _intended(path: Path) -> int:
 
 def _facts_say_live(path: Path) -> bool:
     """True when the driver's facts file records that the run's AI step was the live model (see load_driver.run)."""
+    try:
+        path = confine_existing(path, what="--facts")
+    except PathRefused:
+        return True  # fail closed: a refused path counts as "live" (the model-required check on); _intended refuses it
     try:
         return bool(json.loads(path.read_text(encoding="utf-8")).get("qualifier") == "live_claude")
     except (OSError, ValueError, AttributeError):
@@ -610,6 +651,10 @@ def _facts_say_live(path: Path) -> bool:
 def _drain_marker(path: Path | None) -> float | None:
     if path is None:
         return None
+    try:
+        path = confine_existing(path, what="--drain")
+    except PathRefused as e:
+        raise InputError(str(e)) from e
     try:
         obj = json.loads(path.read_text(encoding="utf-8"))
         value = obj.get("drained_ts")
@@ -654,18 +699,29 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-drain-seconds", type=float, default=DEFAULT_MAX_DRAIN_SECONDS)
     ap.add_argument("--json", type=Path, help="write the JSON result here (default: print it after the table)")
     a = ap.parse_args(argv)
-    facts_path = a.facts or a.requests.with_name(a.requests.name + ".facts.json")
+    try:  # every path of the command line is checked first, before anything is read or written
+        requests = _confined(a.requests, "--requests")
+        book = _confined(a.book, "--book")
+        catcher = _confined(a.catcher, "--catcher")
+        crm = _confined(a.crm, "--crm")
+        model_log = _confined(a.model_log, "--model-log")
+        drain = _confined(a.drain, "--drain") if a.drain else None
+        facts_path = _confined(a.facts or requests.with_name(requests.name + ".facts.json"), "--facts")
+        json_out = _confined(a.json, "--json", output=True) if a.json else None
+    except InputError as e:
+        print(f"INPUT ERROR: {e}", file=sys.stderr)
+        return EXIT_INPUT
     if a.model_required is None:
         a.model_required = os.environ.get("DESK_QUALIFIER") == "live_claude" or _facts_say_live(facts_path)
     try:
         intended = _intended(facts_path)
         result = run_checks(
-            read_jsonl(a.requests),
-            read_book(a.book),
-            read_jsonl(a.catcher),
-            read_crm(a.crm),
-            read_jsonl(a.model_log),
-            _drain_marker(a.drain),
+            read_jsonl(requests),
+            read_book(book),
+            read_jsonl(catcher),
+            read_crm(crm),
+            read_jsonl(model_log),
+            _drain_marker(drain),
             a.model_bound,
             a.max_503_rate,
             a.max_drain_seconds,
@@ -681,8 +737,8 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_INPUT
     print(render_table(result))
     text = json.dumps(result, indent=2, sort_keys=True)
-    if a.json:
-        a.json.write_text(text + "\n", encoding="utf-8")
+    if json_out is not None:
+        json_out.write_text(text + "\n", encoding="utf-8")
     else:
         print(text)
     return EXIT_OK if result["ok"] else EXIT_FAIL

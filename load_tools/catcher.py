@@ -33,6 +33,12 @@ from email import policy
 from email.parser import BytesParser
 from pathlib import Path
 
+try:  # started as a script (python load_tools/catcher.py): the repository folder is not on the path yet
+    from tools.pathconfine import PathRefused, confine
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from tools.pathconfine import PathRefused, confine
+
 BACKLOG = 1024
 LINE_LIMIT = 1 << 20  # one SMTP line (and one message) may be at most 1 MiB
 IDLE_SECONDS = 30.0  # a client silent this long is dropped
@@ -178,10 +184,15 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--port", type=int, default=2525, help="0 = pick a free port (printed on stdout)")
     ap.add_argument("--control", type=Path, default=None, help="mode file (default: <out>.mode)")
     args = ap.parse_args(argv)
-    control = args.control or args.out.with_name(args.out.name + ".mode")
-    args.out.touch()
+    try:  # the same folders as the other load tools (tools/pathconfine.py); nothing is created when one is refused
+        out = confine(args.out, what="--out")
+        control = confine(args.control or out.with_name(out.name + ".mode"), what="--control")
+    except PathRefused as e:
+        print(f"refused: {e}", file=sys.stderr)
+        sys.exit(2)
+    out.touch()
     try:
-        asyncio.run(serve(args.host, args.port, args.out, control))
+        asyncio.run(serve(args.host, args.port, out, control))
     except KeyboardInterrupt:
         sys.exit(0)
 

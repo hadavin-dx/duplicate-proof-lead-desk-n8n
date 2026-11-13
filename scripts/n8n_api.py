@@ -38,13 +38,15 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 REPO = Path(__file__).resolve().parents[1]
-if str(REPO / "src") not in sys.path:
-    sys.path.insert(0, str(REPO / "src"))
+for _p in (str(REPO / "src"), str(REPO)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from http_guard import open_http  # noqa: E402
 
 from lead_desk.config import is_loopback_host  # noqa: E402
 from lead_desk.envnum import SettingRefused, split_url  # noqa: E402
+from tools.pathconfine import confine_existing  # noqa: E402
 
 REFUSED = (
     "N8N_URL must be an https address, or http to this computer (127.0.0.1, ::1 or localhost); "
@@ -189,7 +191,7 @@ def main(a: list[str]) -> int:
             say(w["name"], "active" if w["active"] else "inactive")
     elif cmd == "import":
         try:
-            wf = json.loads(Path(a[2]).read_text(encoding="utf-8"))
+            wf = json.loads(confine_existing(a[2], what="FILE").read_text(encoding="utf-8"))
             wf.setdefault("settings", {})
             str(wf["name"])  # a workflow file without a name is refused here, not after the call
         except (OSError, ValueError, KeyError, AttributeError, RuntimeError) as e:  # no file, not JSON (or nested too

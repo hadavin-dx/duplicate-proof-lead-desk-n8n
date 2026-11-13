@@ -91,6 +91,7 @@ from lead_desk.live_claude import worst_case_usd  # noqa: E402
 from lead_desk.smtp_provider import ProviderSettings, SmtpProviderOutbox  # noqa: E402
 from load_tools.check_invariants import InputError, read_book, render_table, run_checks  # noqa: E402
 from load_tools.load_driver import send_with_retries  # noqa: E402
+from tools.pathconfine import confine_anywhere  # noqa: E402
 
 EXIT_REFUSED, EXIT_STOPPED, EXIT_FAILED = 2, 1, 3
 # Made-up lead addresses on the reserved example domain (not `.test`: a real CRM may refuse that as an invalid
@@ -414,7 +415,7 @@ def sending_rows(db: Path) -> int:
     """How many follow-ups the book shows in state `sending` (read right after the first desk process was stopped):
     the ones that were in flight at the kill. An unreadable book counts 0 (the later read then fails loudly)."""
     try:
-        return sum(1 for s, _, _ in read_book(db)["followups"].values() if s == "sending")
+        return sum(1 for s, _, _ in read_book(db, anywhere=True)["followups"].values() if s == "sending")
     except InputError:
         return 0
 
@@ -642,7 +643,11 @@ def load_env(path: Path) -> dict[str, str]:
     be upper-case letters, digits and underscore only: a lower-case `desk_qualifier` is refused here, so it can never
     slip past the forced values (the child process may see a case-insensitive environment)."""
     out: dict[str, str] = {}
-    for n, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    # the settings file is named on purpose and kept outside the repository (docs/real-services.md): resolved and
+    # looked up in the listings from the top of the file system, not confined to a folder (tools/pathconfine.py); the
+    # paths it names (book, run folder, keys) are used as written
+    config = confine_anywhere(path, what="--config")
+    for n, raw in enumerate(config.read_text(encoding="utf-8").splitlines(), 1):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
@@ -972,7 +977,7 @@ def _run(a: argparse.Namespace, stack: contextlib.ExitStack) -> int:
         d2.stop()
 
     try:
-        book = read_book(db)
+        book = read_book(db, anywhere=True)
     except InputError as e:
         print(f"cannot read the desk's book: {e}")
         return EXIT_FAILED

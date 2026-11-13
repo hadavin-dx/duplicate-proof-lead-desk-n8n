@@ -49,6 +49,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
+try:  # started as a script (python tools/scrub_n8n_export.py): the repository folder is not on the path yet
+    from tools.pathconfine import PathRefused, confine, confine_existing
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from tools.pathconfine import PathRefused, confine, confine_existing
+
 TOP = ("name", "active", "nodes", "connections")
 SETTINGS = ("executionOrder",)  # add a key here only when the demo needs that setting
 NODE = (
@@ -175,8 +181,14 @@ def main(argv: list[str]) -> int:
     except ValueError:
         print("usage: python -m tools.scrub_n8n_export in.json out.json")
         return 2
-    wf = json.loads(Path(src).read_text(encoding="utf-8"))
-    Path(dst).write_text(json.dumps(scrub(wf), indent=2, ensure_ascii=False) + chr(10), encoding="utf-8")
+    try:
+        src_path = confine_existing(src, what="in.json")
+        dst_path = confine(dst, what="out.json")
+    except PathRefused as e:
+        print(f"refused: {e}")
+        return 2
+    wf = json.loads(src_path.read_text(encoding="utf-8"))
+    dst_path.write_text(json.dumps(scrub(wf), indent=2, ensure_ascii=False) + chr(10), encoding="utf-8")
     return 0
 
 
