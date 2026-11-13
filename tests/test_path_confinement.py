@@ -5,14 +5,17 @@ Made-up data only; the "outside" folder is a sibling folder of the jail in the t
 
 from __future__ import annotations
 
+import ast
 import importlib
 import json
 import ntpath
 import os
+import re
 import shutil
 import sqlite3
 import sys
 import tempfile
+import types
 import unicodedata
 from pathlib import Path
 from typing import Any
@@ -22,7 +25,7 @@ import pytest
 import tools.pathconfine as pc
 from load_tools import check_invariants as ci
 from load_tools import load_driver
-from tests.support import start_proc, stop_proc
+from support import start_proc, stop_proc
 from tools import scrub_n8n_export
 
 REPO = Path(__file__).resolve().parent.parent
@@ -522,7 +525,11 @@ def test_scrub_refuses_outside_in_and_out(jail: tuple[Path, Path], capsys: pytes
     assert not (inside / "out.json").exists()
     assert scrub_n8n_export.main(["x", str(inside / "in.json"), str(outside / "out.json")]) == 2
     assert not (outside / "out.json").exists()
-    assert "refused" in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert "refused" in captured.err and captured.out == ""  # an error goes to the error stream, not to the output
+    assert scrub_n8n_export.main(["x"]) == 2
+    captured = capsys.readouterr()
+    assert "usage:" in captured.err and captured.out == ""
     assert scrub_n8n_export.main(["x", str(inside / "in.json"), str(inside / "out.json")]) == 0
     assert (inside / "out.json").is_file()
 
@@ -766,20 +773,83 @@ def test_random_paths_never_leave_the_allowed_folder(jail: tuple[Path, Path]) ->
         assert os.path.commonpath([str(got), str(root)]) == str(root), text
 
 
-def test_no_flagged_site_opens_a_raw_argument() -> None:
-    """Siblings guard: each tool file imports the helper (a new tool that opens argv text must do the same)."""
-    for rel in (
-        "load_tools/check_invariants.py",
-        "load_tools/load_driver.py",
-        "scripts/n8n_api.py",
-        "scripts/run_real_check.py",
-        "tools/scrub_n8n_export.py",
-        "load_tools/catcher.py",
-    ):
-        assert "tools.pathconfine import" in (REPO / rel).read_text(encoding="utf-8"), rel
+# A LIST OF THE KNOWN SITES, NOT A PROOF THAT NO SITE IS MISSING. Each entry names a file, the function that holds the
+# site (its ``def`` line) and the exact text of the helper call that must stay in that function. It is read as plain
+# text: it does not analyse the code, it does not follow a path from one function to another, and it cannot see a new
+# file operation that nobody added to this list. The real checks are the behaviour tests of this file (each one starts
+# the tool with a path outside the allowed folders and sees the refusal).
+_TOOL_FILES = (
+    "load_tools/check_invariants.py",
+    "load_tools/load_driver.py",
+    "scripts/n8n_api.py",
+    "scripts/run_real_check.py",
+    "tools/scrub_n8n_export.py",
+    "load_tools/catcher.py",
+    "demo_only/fake_model_server.py",
+)
+_KNOWN_SITES: tuple[tuple[str, str, str], ...] = (
+    ("load_tools/check_invariants.py", "def read_jsonl(", 'confine_existing(path, what="log file")'),
+    ("load_tools/check_invariants.py", "def read_crm(", 'confine_existing(path, what="CRM dump")'),
+    ("load_tools/check_invariants.py", "def read_book(", "confine_anywhere(path, what=what)"),
+    ("load_tools/check_invariants.py", "def read_book(", "confine_existing(path, what=what)"),
+    ("load_tools/check_invariants.py", "def _intended(", 'confine_existing(path, what="--facts")'),
+    ("load_tools/check_invariants.py", "def _facts_say_live(", 'confine_existing(path, what="--facts")'),
+    ("load_tools/check_invariants.py", "def _drain_marker(", 'confine_existing(path, what="--drain")'),
+    ("load_tools/check_invariants.py", "def main(", '_confined(a.requests, "--requests")'),
+    ("load_tools/check_invariants.py", "def main(", '_confined(a.book, "--book")'),
+    ("load_tools/check_invariants.py", "def main(", '_confined(a.catcher, "--catcher")'),
+    ("load_tools/check_invariants.py", "def main(", '_confined(a.crm, "--crm")'),
+    ("load_tools/check_invariants.py", "def main(", '_confined(a.model_log, "--model-log")'),
+    ("load_tools/check_invariants.py", "def main(", '_confined(a.drain, "--drain")'),
+    ("load_tools/check_invariants.py", "def main(", "_confined(a.facts or"),
+    ("load_tools/check_invariants.py", "def main(", '_confined(a.json, "--json", output=True)'),
+    ("load_tools/load_driver.py", "def run(", 'confine(log, what="--log")'),
+    ("load_tools/load_driver.py", "def run(", 'confine(facts_path, what="--facts")'),
+    ("scripts/n8n_api.py", "def main(", 'confine_existing(a[2], what="FILE")'),
+    ("scripts/run_real_check.py", "def load_env(", 'confine_anywhere(path, what="--config")'),
+    ("tools/scrub_n8n_export.py", "def main(", 'confine_existing(src, what="in.json")'),
+    ("tools/scrub_n8n_export.py", "def main(", 'confine(dst, what="out.json")'),
+    ("load_tools/catcher.py", "def main(", 'confine(args.out, what="--out")'),
+    ("load_tools/catcher.py", "def main(", "confine(args.control or"),
+    ("demo_only/fake_model_server.py", "def main(", 'confine_existing(a.key_file, what="--key-file")'),
+    ("demo_only/fake_model_server.py", "def main(", 'confine(a.call_log, what="--call-log")'),
+    ("demo_only/fake_model_server.py", "def main(", 'confine(a.control_file, what="--control-file")'),
+)
 
 
-# ---------- P3 final: the helper at every flagged site, the rv17 findings, the three public functions ----------
+def _function_text(source: str, header: str) -> str | None:
+    """The text from the line that starts with ``header`` to the next top-level ``def``, ``async def`` or ``class``,
+    without the lines that are only a comment (a trailing comment after code is NOT stripped)."""
+    start = source.find("\n" + header)
+    if start < 0:
+        return None
+    rest = source[start + 1 :]
+    ends = [i for i in (rest.find("\ndef ", 1), rest.find("\nasync def ", 1), rest.find("\nclass ", 1)) if i > 0]
+    body = rest[: min(ends)] if ends else rest
+    return "\n".join(ln for ln in body.splitlines() if not ln.lstrip().startswith("#"))
+
+
+@pytest.mark.parametrize("rel", _TOOL_FILES)
+def test_each_tool_file_imports_the_path_helper(rel: str) -> None:
+    """The import line of the helper is still in the file (the fallback import counts as the same line)."""
+    text = (REPO / rel).read_text(encoding="utf-8").splitlines()
+    lines = [ln for ln in text if "from tools.pathconfine import" in ln and not ln.lstrip().startswith("#")]
+    assert any("confine" in ln.split("import", 1)[1] for ln in lines), rel  # a name of the helper is imported
+
+
+@pytest.mark.parametrize(("rel", "header", "call"), _KNOWN_SITES)
+def test_each_known_site_still_uses_the_path_helper(rel: str, header: str, call: str) -> None:
+    """A list of the known sites, not a proof that no site is missing: the function that holds the site must still
+    contain the exact helper call text. A site is caught only when that call text disappears from the function (or the
+    function is renamed). A raw open that leaves the call text next to it, a trailing comment that keeps the text (only
+    whole-line comments are ignored), and call text moved to the end of the last function of a file all still pass. A
+    NEW file operation that is not in the list is not seen here. The behaviour tests of this file are the real check."""
+    body = _function_text((REPO / rel).read_text(encoding="utf-8"), header)
+    assert body is not None, f"{rel}: no function starts with {header!r} (renamed? update _KNOWN_SITES)"
+    assert call in body, f"{rel}: {header} no longer contains {call!r}"
+
+
+# ---------- P3 final: the helper at the listed sites, the rv17 findings, the three public functions ----------
 
 
 def _book(path: Path, *, state: str = "queued") -> None:
@@ -1037,7 +1107,7 @@ def test_the_readme_says_what_the_wide_folders_allow() -> None:
     assert "<(command)" in text and "mode 0711" in text  # the cost of the listing lookup for --config is said
 
 
-# every flagged site: the function that holds the file operation must call one of the three helpers by itself
+# the listed functions: each holds a file operation and must call one of the three helpers by itself (a hand list)
 SITES = [
     ("load_tools/check_invariants.py", "read_jsonl", {"confine_existing"}),
     ("load_tools/check_invariants.py", "read_crm", {"confine_existing"}),
@@ -1054,15 +1124,425 @@ SITES = [
 
 
 @pytest.mark.parametrize(("rel", "func", "helpers"), SITES)
-def test_each_flagged_function_calls_the_helper_itself_and_never_an_inline_guard(
+def test_the_listed_function_calls_the_helper_and_has_no_inline_guard(
     rel: str, func: str, helpers: set[str]
 ) -> None:
-    import ast
-
     tree = ast.parse((REPO / rel).read_text(encoding="utf-8"))
     node = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == func)
     called = {c.func.id for c in ast.walk(node) if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)}
     assert helpers <= called, (rel, func, called)
-    # the INLINE guard (realpath + commonpath in the tool) is the shape the analyser keeps refusing: not in tools
+    # the INLINE guard (realpath + commonpath in the tool) is not used in the tools: the helper does it
     attrs = {c.attr for c in ast.walk(node) if isinstance(c, ast.Attribute)}
     assert not {"realpath", "commonpath"} & attrs, (rel, func)
+
+
+# -- follow-up A: a foreign `tools` package, hard links, Windows network paths ------------------------------
+
+
+@pytest.mark.parametrize("script", ["check_invariants.py", "load_driver.py"])
+def test_a_script_start_survives_a_foreign_tools_package(tmp_path: Path, script: str) -> None:
+    """Class: the fallback import assumed that any failure means "the repository folder is not on the path yet". A
+    ``tools`` package of another project (here an empty one, first on PYTHONPATH) is found first and cached, so
+    adding the repository folder afterwards changed nothing and the start failed with ModuleNotFoundError."""
+    foreign = tmp_path / "foreign" / "tools"
+    foreign.mkdir(parents=True)
+    (foreign / "__init__.py").write_text("", encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["PYTHONPATH"] = str(tmp_path / "foreign") + os.pathsep + str(REPO / "src")
+    proc = start_proc([str(REPO / "load_tools" / script), "--help"], env)
+    proc.wait(timeout=60)
+    out = stop_proc(proc).decode("utf-8", "replace")
+    assert proc.returncode == 0, out[-500:]
+    assert "usage" in out.lower()
+
+
+@pytest.mark.parametrize("script", ["check_invariants.py", "load_driver.py", "catcher.py"])
+def test_a_foreign_tools_pathconfine_that_lacks_the_name_falls_back_to_ours(tmp_path: Path, script: str) -> None:
+    """The first import of a foreign ``tools.pathconfine`` that lacks the name raises ImportError (not its subclass
+    ModuleNotFoundError): the fallback must catch that too, drop the foreign package and load the repository's."""
+    foreign = tmp_path / "foreign" / "tools"
+    foreign.mkdir(parents=True)
+    (foreign / "__init__.py").write_text("", encoding="utf-8")
+    (foreign / "pathconfine.py").write_text("OTHER = 1\n", encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["PYTHONPATH"] = str(tmp_path / "foreign") + os.pathsep + str(REPO / "src")
+    proc = start_proc([str(REPO / "load_tools" / script), "--help"], env)
+    proc.wait(timeout=60)
+    out = stop_proc(proc).decode("utf-8", "replace")
+    assert proc.returncode == 0, out[-500:]
+    assert "usage" in out.lower()
+
+
+_KEEP_OURS = """
+import runpy, sys, types
+mod = types.ModuleType("tools.keepme")  # a module of THIS repository's tools package, already imported
+mod.__file__ = sys.argv[2] + "/tools/keepme.py"
+sys.modules["tools.keepme"] = mod
+sys.path.insert(0, sys.argv[1])  # a foreign `tools` package comes first
+runpy.run_path(sys.argv[3], run_name="not_main")
+assert sys.modules["tools.keepme"] is mod, "a module of this repository was dropped"
+import tools.pathconfine as pc
+assert pc.__file__.startswith(sys.argv[2]), pc.__file__
+print("kept")
+"""
+
+
+@pytest.mark.parametrize("script", ["check_invariants.py", "load_driver.py", "catcher.py"])
+def test_the_fallback_drops_only_foreign_tools_modules(tmp_path: Path, script: str) -> None:
+    """Only the ``tools`` modules that are not under the repository are dropped: one of ours that is already imported
+    keeps its identity (a second copy would break an ``isinstance`` check or a patch made on the first)."""
+    foreign = tmp_path / "foreign" / "tools"
+    foreign.mkdir(parents=True)
+    (foreign / "__init__.py").write_text("", encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["PYTHONPATH"] = str(REPO / "src")
+    proc = start_proc(
+        ["-I", "-c", _KEEP_OURS, str(tmp_path / "foreign"), str(REPO), str(REPO / "load_tools" / script)], env
+    )
+    proc.wait(timeout=60)
+    out = stop_proc(proc).decode("utf-8", "replace")
+    assert proc.returncode == 0, out[-800:]
+    assert out.strip().endswith("kept"), out[-500:]
+
+
+@pytest.mark.parametrize("script", ["check_invariants.py", "load_driver.py", "catcher.py"])
+def test_the_fallback_import_runs_in_this_process_and_keeps_our_modules(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, script: str
+) -> None:
+    """The same fallback as the subprocess tests above, but run in THIS process (so that the coverage tool sees it):
+    a ``tools`` package of another project is first on the path and already cached, it has no ``pathconfine`` names.
+    After the file's top-level code ran, the foreign modules (also one with no file) are gone, a module of this
+    repository that was already imported is the same object, and the helper comes from this repository."""
+    import runpy
+
+    foreign = tmp_path / "foreign" / "tools"
+    foreign.mkdir(parents=True)
+    (foreign / "__init__.py").write_text("", encoding="utf-8")
+    (foreign / "pathconfine.py").write_text("OTHER = 1\n", encoding="utf-8")
+    for name in [n for n in sys.modules if n == "tools" or n.startswith("tools.")]:
+        monkeypatch.delitem(sys.modules, name)  # put back at the end of the test
+    monkeypatch.setattr(sys, "path", [str(tmp_path / "foreign"), *sys.path])
+    ours = types.ModuleType("tools.keepme")
+    ours.__file__ = str(REPO / "tools" / "keepme.py")
+    monkeypatch.setitem(sys.modules, "tools.keepme", ours)
+    monkeypatch.setitem(sys.modules, "tools.nofile", types.ModuleType("tools.nofile"))  # a namespace-like module
+    seen = runpy.run_path(str(REPO / "load_tools" / script), run_name="fallback_probe")
+    assert sys.modules["tools.keepme"] is ours and "tools.nofile" not in sys.modules
+    assert Path(sys.modules["tools.pathconfine"].__file__ or "").resolve().is_relative_to(REPO.resolve())
+    assert seen["confine"] is sys.modules["tools.pathconfine"].confine
+    assert "OTHER" not in vars(sys.modules["tools.pathconfine"])
+
+
+def test_a_hard_link_to_an_outside_file_passes_the_check(jail: tuple[Path, Path]) -> None:
+    """Pins the documented limit (tools/pathconfine.py, load_tools/README.md): a hard link is another name for the same
+    contents, there is no path to follow, so the check accepts it and a write goes through to the outside file."""
+    inside, outside = jail
+    target = outside / "secret.txt"
+    target.write_text(SECRET, encoding="utf-8")
+    try:
+        os.link(target, inside / "alias.txt")
+    except OSError as exc:  # a file system without hard links
+        pytest.skip(f"no hard links here: {exc}")
+    read = pc.confine_existing(inside / "alias.txt", what="f")
+    assert read.parent == inside.resolve() and read.read_text(encoding="utf-8") == SECRET
+    pc.confine(inside / "alias.txt", what="f").write_text("changed", encoding="utf-8")
+    assert target.read_text(encoding="utf-8") == "changed"
+
+
+def test_the_hard_link_limit_is_documented() -> None:
+    assert "Hard links are not detected" in (pc.__doc__ or "")
+    assert "Hard links are not detected" in (REPO / "load_tools" / "README.md").read_text(encoding="utf-8")
+
+
+def test_the_foreign_tools_limit_is_stated_where_the_import_is() -> None:
+    """The exact limit is written next to each import and in the README: detected only when the foreign package lacks
+    the helper names; a foreign one with the same names is used as it is; three entry points do not handle it at all."""
+    for rel in ("load_tools/catcher.py", "load_tools/load_driver.py", "load_tools/check_invariants.py"):
+        assert "is NOT detected" in (REPO / rel).read_text(encoding="utf-8"), rel
+    for rel in ("tools/scrub_n8n_export.py", "scripts/n8n_api.py"):
+        assert "another project's `tools`" in (REPO / rel).read_text(encoding="utf-8"), rel
+    assert "another project's ``tools``" in (REPO / "demo_only" / "fake_model_server.py").read_text(encoding="utf-8")
+    readme = (REPO / "load_tools" / "README.md").read_text(encoding="utf-8")
+    assert "do NOT notice a foreign `tools.pathconfine` that has the same names" in readme
+    assert "stop with a Python traceback" in readme and "only when neither folder is already on `PYTHONPATH`" in readme
+    assert "`LEAD_DESK_PATH_ROOTS=/`" in readme
+
+
+def _unc_uri(_path: object) -> str:
+    """Stand-in for ``readonly_sqlite_uri`` as it behaves on Windows for a book on a share (ntpath on this system)."""
+    return pc.readonly_sqlite_uri(r"\\\\server\\share\\x.db", ntpath)
+
+
+def test_read_book_turns_the_network_path_refusal_into_an_input_error(
+    jail: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The refusal of a Windows network path used to leave ``read_book`` as a ``PathRefused`` traceback, but every
+    caller (check_invariants.main, scripts/run_real_check.py) catches only ``InputError``."""
+    inside, _ = jail
+    (inside / "b.db").write_text("", encoding="utf-8")
+    monkeypatch.setattr(ci, "readonly_sqlite_uri", _unc_uri)
+    for anywhere in (False, True):
+        with pytest.raises(ci.InputError, match="device or network path"):
+            ci.read_book(inside / "b.db", anywhere=anywhere)
+
+
+def test_check_invariants_main_reports_a_network_path_book_as_an_input_error(
+    jail: tuple[Path, Path], capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    inside, _ = jail
+    for name in ("r.jsonl", "c.jsonl", "l.jsonl"):
+        (inside / name).write_text('{"a": 1}\n', encoding="utf-8")
+    (inside / "m.json").write_text("[]", encoding="utf-8")
+    (inside / "b.db").write_text("", encoding="utf-8")
+    (inside / "r.jsonl.facts.json").write_text(json.dumps({"intended_requests": 1}), encoding="utf-8")
+    monkeypatch.setattr(ci, "readonly_sqlite_uri", _unc_uri)
+    monkeypatch.delenv("DESK_QUALIFIER", raising=False)
+    args = _ci_args(inside) | {"--facts": "r.jsonl.facts.json"}
+    del args["--drain"]
+    assert ci.main([w for pair in args.items() for w in pair]) == ci.EXIT_INPUT
+    err = capsys.readouterr().err
+    assert err.startswith("INPUT ERROR:") and "device or network path" in err and "Traceback" not in err
+
+
+def test_run_real_check_reads_a_network_path_book_as_unreadable_not_a_traceback(
+    jail: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    inside, _ = jail
+    (inside / "b.db").write_text("", encoding="utf-8")
+    monkeypatch.setattr(ci, "readonly_sqlite_uri", _unc_uri)
+    rrc = _rrc(monkeypatch)
+    assert rrc.sending_rows(inside / "b.db") == 0  # "an unreadable book counts 0"
+
+
+def test_a_windows_network_path_is_refused_for_the_sqlite_uri() -> None:
+    """The text ``Path.as_uri`` builds for a share has a host name after ``file://``; SQLite accepts only an empty one
+    or ``localhost`` (SQLite's documentation of its URI names), so the open cannot work: refuse it with a clear
+    message. Linux cannot run SQLite on Windows: only the URI text and the refusal are measured here.
+    """
+    from pathlib import PureWindowsPath
+
+    unc = r"\\server\share\x.db"
+    assert PureWindowsPath(unc).as_uri() == "file://server/share/x.db"
+    for text in (
+        unc,
+        "//server/share/x.db",
+        "\\/server\\share/x.db",  # mixed separators: ntpath treats them as a network path too
+        "/\\server/share/x.db",
+        "\\\\?\\UNC\\server\\share\\x.db",
+        "//?/UNC/server/share/x.db",
+        "\\\\.\\C:\\x.db",  # a device path and an extended-length local path: not a share, but refused too
+        "\\\\?\\C:\\x.db",
+        "\\\\localhost\\c$\\x.db",
+    ):
+        with pytest.raises(pc.PathRefused, match="device or network path"):
+            pc.readonly_sqlite_uri(text, ntpath)
+    # a relative name is made absolute first: in a current folder that is a share it builds a share path
+    in_a_share: Any = types.SimpleNamespace(
+        sep=ntpath.sep, splitroot=ntpath.splitroot, abspath=lambda _t: r"\\server\share\x.db"
+    )
+    with pytest.raises(pc.PathRefused, match="device or network path"):
+        pc._refuse_network_path("x.db", in_a_share)
+    pc._refuse_network_path("C" + r":\books\x.db", ntpath)  # a drive letter is fine
+    pc._refuse_network_path("//server/share/x.db")  # on this system it is an ordinary path
+
+
+_ALWAYS_REFUSED = [
+    r"\\host\share\x.db",
+    "//host/share/x.db",
+    "\\/host\\share/x.db",
+    "/\\host/share/x.db",
+    r"\\?\UNC\host\share\x.db",
+    "//?/UNC/host/share/x.db",
+    r"\\?\C" + ":" + r"\x.db",
+    r"\\.\C" + ":" + r"\x.db",
+    r"\\localhost\share\x.db",
+    "//localhost/c$/x.db",
+    r"\\host",
+    "//",
+    r"\??\UNC\host\share\x",  # the NT object path form
+    r"\??\C" + ":" + r"\x.db",
+    "/??/UNC/host/share/x",
+    "\\??\\unc\\host",
+]
+
+
+@pytest.mark.parametrize("text", _ALWAYS_REFUSED)
+def test_every_windows_device_or_network_form_is_refused_with_ntpath(text: str) -> None:
+    with pytest.raises(pc.PathRefused, match="Windows device or network path"):
+        pc.readonly_sqlite_uri(text, ntpath)
+
+
+@pytest.mark.parametrize(
+    ("text", "match"),
+    [
+        ("", "the path is empty"),
+        ("\x00", "control character"),
+        ("a\x01b.db", "control character"),
+        ("a\nb.db", "control character"),
+        ("a\x7fb.db", "control character"),
+    ],
+)
+@pytest.mark.parametrize("module", [ntpath, os.path], ids=["ntpath", "os.path"])
+def test_empty_and_control_character_text_is_refused_on_every_system(text: str, match: str, module: Any) -> None:
+    """Before: ``''`` built ``file:///<current folder>?mode=ro`` and NUL built ``file:///<folder>/%00?mode=ro``."""
+    with pytest.raises(pc.PathRefused, match=match):
+        pc.readonly_sqlite_uri(text, module)
+
+
+@pytest.mark.parametrize("text", ["C" + r":\books\x.db", "x.db", r"sub\x.db", "C" + ":/books/x.db", r"\x.db"])
+def test_ordinary_windows_forms_still_pass_with_ntpath(text: str) -> None:
+    uri = pc.readonly_sqlite_uri(text, ntpath)
+    assert uri.startswith("file:///") and uri.endswith("?mode=ro")
+
+
+def test_on_this_system_the_uri_is_the_same_as_before(tmp_path: Path) -> None:
+    """Linux and macOS: a normal path, and the names that look like Windows shares, build the same text as before; the
+    NT form is an ordinary file name there."""
+    book = tmp_path / "my book#1.db"
+    assert pc.readonly_sqlite_uri(book) == book.absolute().as_uri() + "?mode=ro"
+    assert pc.readonly_sqlite_uri(str(book)) == book.absolute().as_uri() + "?mode=ro"
+    if os.name != "nt":
+        for text in ("//host/share/x.db", r"\\host\share\x.db", r"\??\UNC\host\share\x"):
+            assert pc.readonly_sqlite_uri(text) == Path(text).absolute().as_uri() + "?mode=ro", text
+
+
+# ---------- follow-up B: the fake model server's path options, the message and stream nits ----------
+
+
+def _fake_model_main(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> list[dict[str, Any]]:
+    """Run demo_only.fake_model_server.main() with these arguments, without a socket; returns what it handed to
+    make_model_server. A refusal is a SystemExit."""
+    from demo_only import fake_model_server as fms
+
+    handed: list[dict[str, Any]] = []
+
+    class _Stop(Exception):
+        pass
+
+    def fake_make(**kw: Any) -> Any:
+        handed.append(kw)
+        raise _Stop
+
+    monkeypatch.setattr(fms, "make_model_server", fake_make)
+    monkeypatch.setattr(sys, "argv", ["fake_model_server", "--port", "0", *argv])
+    try:
+        fms.main()
+    except _Stop:
+        pass
+    return handed
+
+
+@pytest.mark.parametrize("option", ["--call-log", "--control-file", "--key-file"])
+def test_fake_model_server_refuses_each_path_option_outside_the_allowed_folders(
+    jail: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], option: str
+) -> None:
+    _, outside = jail
+    (outside / "x.txt").write_text("fake-key-for-the-test\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as e:
+        _fake_model_main(monkeypatch, [option, str(outside / "x.txt")])
+    assert e.value.code == 2
+    err = capsys.readouterr().err
+    assert f"refused: {option}: path is outside" in err and pc.ROOTS_ENV in err
+    assert sorted(p.name for p in outside.iterdir()) == ["x.txt"]
+    with pytest.raises(SystemExit):  # a new file outside is not created either
+        _fake_model_main(monkeypatch, [option, str(outside / "new.txt")])
+    assert not (outside / "new.txt").exists()
+
+
+def test_fake_model_server_hands_the_checked_paths_on_and_reads_the_key_from_the_checked_file(
+    jail: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    inside, _ = jail
+    (inside / "k.txt").write_text("fake-key-for-the-test\n", encoding="utf-8")
+    argv = ["--key-file", "k.txt", "--call-log", "calls.jsonl", "--control-file", "mode.txt"]
+    handed = _fake_model_main(monkeypatch, argv)
+    assert handed == [
+        {
+            "port": 0,
+            "mode": "ok",
+            "key": "fake-key-for-the-test",
+            "call_log": inside.resolve() / "calls.jsonl",
+            "control_file": inside.resolve() / "mode.txt",
+        }
+    ]
+    with pytest.raises(SystemExit):  # a key file that does not exist is refused, not a traceback
+        _fake_model_main(monkeypatch, ["--key-file", "none.txt"])
+
+
+def test_n8n_api_import_message_names_the_rule_and_the_folder_list(
+    jail: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    inside, outside = jail
+    (outside / "wf.json").write_text(json.dumps({"name": "made-up"}), encoding="utf-8")
+    (inside / "key.txt").write_text("made-up-key-for-the-test\n", encoding="utf-8")
+    monkeypatch.setenv("N8N_API_KEY_FILE", str(inside / "key.txt"))
+    monkeypatch.setenv("N8N_URL", "http://127.0.0.1:1")
+    monkeypatch.syspath_prepend(str(REPO / "scripts"))
+    sys.modules.pop("n8n_api", None)
+    mod = importlib.import_module("n8n_api")
+    for target in (outside / "wf.json", inside / "missing.json"):
+        with pytest.raises(SystemExit) as e:
+            mod.main(["n8n_api.py", "import", str(target)])
+        msg = str(e.value.code)
+        assert "cannot read a workflow" in msg and "FILE:" in msg
+        assert "folder you started in" in msg and pc.ROOTS_ENV in msg
+        assert str(target) not in msg  # the path text is not echoed
+        assert msg.count(pc.ROOTS_ENV) == 1  # said once, not twice
+
+
+def test_scrub_script_started_without_pythonpath_refuses_a_missing_file_and_shows_usage(tmp_path: Path) -> None:
+    """Started as a script with no PYTHONPATH (the documented way to run it): a refusal and the usage text end with
+    exit code 2 and a message, never a traceback. Which stream each goes to is checked in-process, with capsys."""
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    script = str(REPO / "tools" / "scrub_n8n_export.py")
+    cases = (
+        ([str(tmp_path / "in.json"), str(tmp_path / "out.json")], "refused: in.json: no such file"),
+        ([], "usage: python -m tools.scrub_n8n_export"),
+    )
+    for args, start in cases:
+        proc = start_proc([script, *args], env)
+        proc.wait(timeout=60)
+        text = stop_proc(proc).decode("utf-8", "replace")
+        assert proc.returncode == 2 and text.startswith(start), text[-500:]
+    assert not (tmp_path / "out.json").exists()
+
+
+@pytest.mark.parametrize("bad", [None, 123, b"book.db"])
+def test_read_book_refuses_an_argument_that_is_not_a_path_instead_of_failing_on_its_name(bad: Any) -> None:
+    with pytest.raises(ci.InputError, match="not a path"):
+        ci.read_book(bad)
+    with pytest.raises(ci.InputError, match="not a path"):
+        ci.read_book(bad, anywhere=True)
+
+
+def test_read_book_label_shows_only_printable_characters(jail: tuple[Path, Path]) -> None:
+    with pytest.raises(ci.InputError) as err:
+        ci.read_book("x" + chr(0x202E) + "y" + chr(0x1B) + "[31m.db")  # a bidi mark and a control character
+    shown = str(err.value)
+    assert chr(0x1B) not in shown and chr(0x202E) not in shown and "book x" in shown
+
+
+def test_catcher_default_control_file_for_an_out_name_with_a_space(
+    jail: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A name with a space may exist (an existing file keeps its name) but cannot be a NEW file's name, so the default
+    ``<out>.mode`` was refused; the default now maps every character the helper does not allow to ``_``."""
+    from load_tools import catcher
+
+    served: list[tuple[Path, Path]] = []
+
+    async def fake_serve(host: str, port: int, out: Path, control: Path) -> None:
+        served.append((out, control))
+
+    monkeypatch.setattr(catcher, "serve", fake_serve)
+    inside, _ = jail
+    (inside / "my mail.jsonl").write_text("", encoding="utf-8")
+    catcher.main(["--out", "my mail.jsonl", "--port", "0"])
+    mode_name = catcher.default_control_name("my mail.jsonl")
+    assert served == [(inside.resolve() / "my mail.jsonl", inside.resolve() / mode_name)]
+    assert mode_name.startswith("my_mail.jsonl.") and mode_name.endswith(".mode")
+    assert catcher.default_control_name("plain.jsonl") == "plain.jsonl.mode"
+    # two output names that differ only in replaced characters never share one mode file
+    names = ["my mail.jsonl", "my_mail.jsonl", "bé.jsonl", "bè.jsonl", "a b.jsonl", "a?b.jsonl"]
+    assert len({catcher.default_control_name(n) for n in names}) == len(names)
+    assert all(re.fullmatch(r"[A-Za-z0-9._-]+", catcher.default_control_name(n)) for n in names)

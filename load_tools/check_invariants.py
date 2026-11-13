@@ -19,8 +19,14 @@ from typing import Any
 
 try:  # started as a script (python load_tools/check_invariants.py): the repository folder is not on the path yet
     from tools.pathconfine import PathRefused, confine, confine_anywhere, confine_existing, readonly_sqlite_uri
-except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+except ImportError:  # a foreign `tools` package WITHOUT these names is dropped and ours is used; a foreign
+    # `tools.pathconfine` with the SAME names is NOT detected (it is used as it is)
+    _repo = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(_repo))
+    for _name in [n for n in sys.modules if n == "tools" or n.startswith("tools.")]:
+        _file = getattr(sys.modules[_name], "__file__", None)  # a `tools` package of another project, already loaded
+        if _file is None or not Path(_file).resolve().is_relative_to(_repo):
+            del sys.modules[_name]
     from tools.pathconfine import PathRefused, confine, confine_anywhere, confine_existing, readonly_sqlite_uri
 
 # ---- config block (the only place for numbers and words) ----
@@ -112,21 +118,36 @@ def read_crm(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def _book_label(path: object) -> str:
+    """The name of the argument in a refusal: ``book NAME`` (the last part of the path, printable characters only).
+    It never raises, so an argument that is not a path reaches the check and is refused there ("not a path")."""
+    if not isinstance(path, (str, os.PathLike)):
+        return "book"
+    text = os.fspath(path)
+    name = Path(text).name if isinstance(text, str) else ""
+    return "book " + "".join(c if c.isprintable() else "?" for c in name)
+
+
 def read_book(path: Path, *, anywhere: bool = False) -> dict[str, Any]:
     """Read-only look at the desk's SQLite book. The path must lie in an allowed folder (tools/pathconfine.py);
     ``anywhere=True`` is for scripts/run_real_check.py, which reads the book that its own settings file names, kept
     outside the repository on purpose (docs/real-services.md)."""
+    what = _book_label(path)
     try:
         if anywhere:
-            path = confine_anywhere(path, what=f"book {path.name}")
+            path = confine_anywhere(path, what=what)
         else:
-            path = confine_existing(path, what=f"book {path.name}")
+            path = confine_existing(path, what=what)
     except PathRefused as e:
         raise InputError(str(e)) from e
     if not path.is_file():
         raise InputError(f"no such book: {path.name}")
     try:
-        conn = sqlite3.connect(readonly_sqlite_uri(path), uri=True)
+        uri = readonly_sqlite_uri(path)
+    except PathRefused as e:  # a Windows network or device path: a clean input error, never a traceback
+        raise InputError(str(e)) from e
+    try:
+        conn = sqlite3.connect(uri, uri=True)
         try:
             receipts = {
                 (s, r): int(i) for i, s, r in conn.execute("SELECT receipt_id, source, source_ref FROM receipts")

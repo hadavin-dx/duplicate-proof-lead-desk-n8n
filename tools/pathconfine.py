@@ -30,6 +30,11 @@ three folders are wide: inside them an existing file (source code, a workflow fi
 shared temporary folder) can be overwritten by an output option that names it. The check fences a wrong path, not a
 wrong file name inside an allowed folder.
 
+Hard links are not detected. A hard link is a second NAME for the same file contents, not a pointer to another path,
+so ``os.path.realpath`` has nothing to follow: a hard link made inside an allowed folder to a file outside it passes
+the check, and reading or writing it reads or changes the outside file. Only a person with write access to an allowed
+folder (and read access to the target) can make one; the check fences a wrong argument, not that person.
+
 ``confine_anywhere`` is for the settings file of a real run, which the documentation says to keep outside the
 repository. It does the same listing lookup, but starts it at the top of the file system (the drive or share of the
 resolved path: ``os.path.splitroot``, so a Windows network share works too) and has no containment test: every
@@ -53,7 +58,12 @@ system reports it.
 
 ``readonly_sqlite_uri`` builds the connection string for a read-only SQLite file from a path that one of the three
 functions returned: the path, percent-encoded by ``Path.as_uri`` (a ``?`` or ``#`` in a file name cannot start a new
-option), plus the fixed option ``mode=ro``.
+option), plus the fixed option ``mode=ro``. A Windows network or device path
+(``\\\\server\\share\\x.db``, ``\\\\?\\C:\\x.db``) is refused:
+``Path.as_uri`` turns it into ``file://server/share/x.db``, and SQLite accepts only an empty or ``localhost`` name
+after ``file://`` (SQLite's documentation of its URI names), so the read-only open could not work. Copy the book to a
+local drive (a mapped network drive is probably refused too: Windows reports it by its network name; not measured).
+What is NOT measured: the behaviour of SQLite on Windows itself (this was tested on Linux, on the URI text only).
 """
 
 from __future__ import annotations
@@ -273,9 +283,36 @@ def confine_anywhere(path: str | os.PathLike[str], *, what: str) -> Path:
     return Path(_locate_existing(top, _parts(relative), what))
 
 
-def readonly_sqlite_uri(path: str | os.PathLike[str]) -> str:
+_DEVICE_OR_NETWORK = (
+    "book path: a Windows device or network path (\\\\server\\share, \\\\?\\C:\\) cannot be opened read-only by SQLite"
+)
+
+
+def _refuse_network_path(text: str, path_module: ModuleType = os.path) -> None:
+    """Refuse a Windows device or network path: ``\\\\server\\share\\...``, ``//server/share/...`` (also with the two
+    separators mixed), ``\\\\?\\UNC\\...``, ``\\\\?\\C:\\...`` and ``\\\\.\\C:\\...``. ``path_module`` is ``os.path``;
+    a test hands in ``ntpath``. The text is made absolute first (a relative name in a current folder that is a share
+    would build a share path). Empty text and text with a control character (NUL, a new line, ...) are refused on every
+    system, and so is the Windows NT object path form ``\\??\\...`` (``ntpath`` keeps it as an ordinary root). On
+    Linux and macOS ``splitroot`` never reports a drive and the NT form is an ordinary file name, so no other path is
+    refused."""
+    if not text:
+        raise PathRefused("book path: the path is empty")
+    if any(ord(c) < 32 or ord(c) == 127 for c in text):
+        raise PathRefused("book path: contains a control character")
+    flat = text.replace("/", "\\")
+    if path_module.sep == "\\" and flat.startswith("\\??\\"):  # the NT object path form (\??\UNC\... and \??\ plus a drive path)
+        raise PathRefused(_DEVICE_OR_NETWORK)
+    # ntpath also treats a backslash-slash or slash-backslash start as a network path and returns it unchanged
+    # (not normalised): compare in one form
+    if path_module.splitroot(path_module.abspath(text))[0].replace("/", "\\")[:2] == "\\\\":
+        raise PathRefused(_DEVICE_OR_NETWORK)
+
+
+def readonly_sqlite_uri(path: str | os.PathLike[str], path_module: ModuleType = os.path) -> str:
     """``file:`` connection string that opens an existing SQLite file read-only. The path is made absolute and
     percent-encoded by ``Path.as_uri`` (a ``?`` or ``#`` in a file name cannot start a new option); the only text added
     is the fixed option, never a value from the caller. It does not check WHERE the file is: use it on the result of
     ``confine_existing`` or ``confine_anywhere``."""
+    _refuse_network_path(os.fspath(path), path_module)
     return Path(path).absolute().as_uri() + "?mode=ro"

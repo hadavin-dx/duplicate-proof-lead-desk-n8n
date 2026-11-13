@@ -38,7 +38,12 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 REPO = Path(__file__).resolve().parents[1]
-for _p in (str(REPO / "src"), str(REPO)):
+# insert(0) puts each entry first, so the entry added LAST ends up ahead: add the repository folder first, so that src
+# stays ahead of it (the same order as PYTHONPATH=src:. in the run commands). That order holds only when neither folder
+# is on PYTHONPATH already (an entry that is already there is not moved). A `tools` package of another project that
+# comes first on the path stops the start with a traceback (ModuleNotFoundError or ImportError): start it from the
+# repository folder, without another project's `tools` on PYTHONPATH.
+for _p in (str(REPO), str(REPO / "src")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
@@ -46,7 +51,7 @@ from http_guard import open_http  # noqa: E402
 
 from lead_desk.config import is_loopback_host  # noqa: E402
 from lead_desk.envnum import SettingRefused, split_url  # noqa: E402
-from tools.pathconfine import confine_existing  # noqa: E402
+from tools.pathconfine import ROOTS_ENV, PathRefused, confine_existing  # noqa: E402
 
 REFUSED = (
     "N8N_URL must be an https address, or http to this computer (127.0.0.1, ::1 or localhost); "
@@ -194,6 +199,12 @@ def main(a: list[str]) -> int:
             wf = json.loads(confine_existing(a[2], what="FILE").read_text(encoding="utf-8"))
             wf.setdefault("settings", {})
             str(wf["name"])  # a workflow file without a name is refused here, not after the call
+        except PathRefused as e:  # the rule is in the message: a workflow file lies in an allowed folder
+            hint = "" if ROOTS_ENV in str(e) else f"; more folders can be listed in {ROOTS_ENV}"
+            raise SystemExit(
+                f"cannot read a workflow ({e}). Rule: the file must exist and lie in the folder you started in, "
+                f"the repository folder or the temporary folder{hint}"
+            ) from None
         except (OSError, ValueError, KeyError, AttributeError, RuntimeError) as e:  # no file, not JSON (or nested too
             # deeply: RecursionError), not an object, no name
             raise SystemExit(f"cannot read a workflow from {a[2]} ({type(e).__name__})") from None
