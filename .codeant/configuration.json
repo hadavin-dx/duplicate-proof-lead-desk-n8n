@@ -17,6 +17,7 @@
         "requirements-dev-win.txt",
         "requirements-browser.txt",
         "requirements-browser-win.txt",
+        "requirements-semgrep.txt",
         "**/*.png"
       ]
     }
